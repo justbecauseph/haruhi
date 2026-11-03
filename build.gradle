@@ -1,0 +1,88 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	mavenCentral()
+	maven {
+		url = 'https://api.modrinth.com/maven'
+		content { includeGroup 'maven.modrinth' }
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// GeckoLib renders NPC models on the client only. The pack ships it client side, so nothing outside
+	// town.lampas.haruhi.client may reference com.geckolib (ArchitectureTest enforces this). On the dev classpath for
+	// runClient and the GameTests.
+	compileOnly "maven.modrinth:geckolib:${project.geckolib_version}"
+	runtimeOnly "maven.modrinth:geckolib:${project.geckolib_version}"
+
+	// PostgreSQL storage adapter, nested in the jar.
+	implementation "org.postgresql:postgresql:${project.postgresql_version}"
+	include "org.postgresql:postgresql:${project.postgresql_version}"
+	implementation "com.zaxxer:HikariCP:${project.hikaricp_version}"
+	include "com.zaxxer:HikariCP:${project.hikaricp_version}"
+
+	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation "org.testcontainers:testcontainers-postgresql:${project.testcontainers_version}"
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+fabricApi {
+	// Server GameTests in src/gametest, run with runGameTest.
+	configureTests {
+		createSourceSet = true
+		modId = 'haruhi-gametest'
+		enableGameTests = true
+		enableClientGameTests = false
+		eula = true
+	}
+}
+
+def gameTestReportFile = layout.buildDirectory.file('test-results/gameTest/TEST-haruhi-gametest.xml')
+
+tasks.named('runGameTest') {
+	systemProperty 'fabric-api.gametest.report-file', gameTestReportFile.get().asFile.absolutePath
+	doFirst {
+		gameTestReportFile.get().asFile.parentFile.mkdirs()
+	}
+}
+
+test {
+	useJUnitPlatform()
+	// ArchitectureTest reads the compiled main classes.
+	dependsOn 'classes'
+	systemProperty 'haruhi.mainClasses', sourceSets.main.output.classesDirs.asPath
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}

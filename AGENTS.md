@@ -1,0 +1,182 @@
+# AGENTS.md
+
+Haruhi is a Fabric 26.2 mod for scriptable NPCs:
+- data-driven dialogue graphs, edited as one JSON content bundle;
+- a visual-novel dialogue screen, with vanilla dialogs as the fallback;
+- NPCs rendered with Blockbench models through GeckoLib;
+- per-character dialogue flags and visit counts.
+
+It is the framework half of the Lampas
+[Guild commissions and NPC framework plan](https://github.com/justbecauseph/lampas-two-kb/blob/main/docs/plan/GUILD-PLAN.md).
+The Guild itself is a later consumer and is not in this repository.
+
+## Build and verify
+
+```
+./gradlew build          # compile, unit tests (JUnit 5, Testcontainers), and runGameTest (server GameTests)
+./gradlew test           # unit tests only
+./gradlew runGameTest    # server GameTests only
+./gradlew runClient      # dev client, for checking the screen and renderer by hand
+```
+
+- Testcontainers tests need Docker. Annotate them `@Testcontainers(disabledWithoutDocker = true)` so `build` still
+  passes on a machine without Docker. Say in your report when they were skipped.
+- Java 25. Minecraft 26.2 names: `Identifier` (not `ResourceLocation`) and `EntityTypes` holders. Use permission checks
+  such as `Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)`, or `Permissions.COMMANDS_ADMIN` from
+  `net.minecraft.server.permissions`.
+- When unsure of a 26.2 or Fabric API, check the decompiled jar with `javap -cp
+  ~/.gradle/caches/fabric-loom/26.2/minecraft-merged.jar <class>`, not memory. For GeckoLib 5.5.5, the jar is in the
+  Gradle cache under `maven.modrinth/geckolib`.
+- `../lampas-addons` is a working 26.2 Fabric mod with payloads, commands, GameTests and entity code. Read it for
+  idioms; do not change it.
+
+## Architecture
+
+| Component | Package and resources | Delivers | Depends on |
+|---|---|---|---|
+| storage | `town.lampas.haruhi.storage` (except the contract files below), `src/main/resources/haruhi/migrations/` | `StorageModule`, config `config/haruhi.json`, in-memory and PostgreSQL (`HikariCP`, versioned SQL migrations) implementations of `HaruhiStorage` | nothing |
+| content | `town.lampas.haruhi.content` (except the contract files), `src/main/resources/haruhi/seed_bundle.json` | `ContentModule`: JSON codecs for the bundle format below, full validation, SHA-256 digest, revisions through `HaruhiStorage`, activation on startup, `/haruhi content` commands | storage (interface), `DialogueRegistries` for parsing specs |
+| dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` | `DialogueModule`: sessions, graph runtime, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
+| npc and client | `town.lampas.haruhi.npc` (except `NpcControl`), `town.lampas.haruhi.client` (except `HaruhiClient`), `assets/haruhi/**` | `NpcModule`: entity type, profile and look syncing, interaction, `/haruhi npc` commands, `NpcControl`. `NpcClient`: GeckoLib replaced-entity renderer, vanilla player-model fallback, default humanoid model and animations, animation payload receiver. `DialogueClient`: the visual-novel screen | content (`ContentService`), dialogue (`DialogueService`), the payloads |
+
+Initialisation order, in `Haruhi.onInitialize`: payload types, storage, content, dialogue, npc. A module may read the
+services of the modules before it from `HaruhiServices`. A module that needs a later one, such as dialogue needing
+`NpcControl`, reads it lazily at use time, never during `init()`.
+
+### Contracts
+
+Only the orchestrator changes these. If your component needs a change, do not edit them. Report the change you need,
+with the reason, in your final message.
+
+- `Haruhi.java`, `api/HaruhiServices.java`, `client/HaruhiClient.java`
+- `storage/HaruhiStorage.java`, `FlagKey`, `FlagChange`, `VisitKey`, `VisitRecord`, `StoredRevision`, `RevisionSummary`
+- `content/ContentService.java`, `content/model/*`
+- `dialogue/api/*`
+- `npc/NpcControl.java`
+- `network/*` (payload records and `HaruhiNetworking`)
+- `build.gradle`, `gradle.properties`, `settings.gradle`, `src/main/resources/fabric.mod.json`, both mixin configs, `src/gametest/resources/fabric.mod.json`, `src/test/java/town/lampas/haruhi/ArchitectureTest.java`
+
+Each component writes its GameTests in its own class, already listed in the GameTest entrypoints:
+`town.lampas.haruhi.gametest.{Storage,Content,Npc,Dialogue}GameTests`. Each also adds unit tests under
+`src/test/java/town/lampas/haruhi/<component>/`. GameTest fixtures go in
+`src/gametest/resources/haruhi/fixtures/<component>/`.
+
+### Rules every component follows
+
+- **Client code stays in the client package.** Nothing outside `town.lampas.haruhi.client` references
+  `net.minecraft.client` or `com.geckolib`. The Lampas server does not have GeckoLib, and `ArchitectureTest` fails the
+  build if this is broken. The NPC entity class is a plain Minecraft entity.
+- **No blocking I/O on the server thread.** Storage futures complete off-thread. Hop back with `server.execute(...)`
+  before touching game state.
+- **The server checks again whatever the client sends.** The client sends only session id, node id and choice index.
+- **Lang file:** only the npc and client component edits `assets/haruhi/lang/en_us.json`. Other components use
+  `Component.literal` for command feedback.
+- **Configuration:** storage owns `config/haruhi.json`. Dialogue owns `config/haruhi-dialogue.json`, which holds the
+  command-action allowlist.
+
+## Content bundle format
+
+One JSON document. Ids are `namespace:path` strings, and text fields use Minecraft's text component JSON (a plain
+string is allowed). Every key is snake_case. A spec (condition, action or provider) is an object with `type`; its
+other keys are the arguments, stored in `ConditionSpec.args` with `type` removed.
+
+```json
+{
+  "schema": 1,
+  "flags": {
+    "haruhi:example/greeter": ["met", "times_talked", "helped"]
+  },
+  "npcs": {
+    "haruhi:example/greeter": {
+      "name": "Greeter",
+      "model": "haruhi:example/greeter",
+      "texture": "minecraft:textures/entity/player/wide/steve.png",
+      "animations": "haruhi:humanoid",
+      "portrait": "haruhi:textures/portrait/greeter.png",
+      "dialogue": "haruhi:example/greeter",
+      "scale": 1.0
+    }
+  },
+  "dialogues": {
+    "haruhi:example/greeter": {
+      "start": "hello",
+      "nodes": {
+        "hello": {
+          "random": [ { "node": "hello_first", "weight": 1 }, { "node": "hello_again", "weight": 1 } ]
+        },
+        "hello_first": {
+          "speaker": "haruhi:example/greeter",
+          "text": "Welcome to Maraha.",
+          "animation": "talk",
+          "on_enter": [ { "type": "haruhi:flag/add", "namespace": "haruhi:example/greeter", "flag": "times_talked", "delta": 1 } ],
+          "choices": [
+            { "text": "Thanks.", "next": "bye", "actions": [ { "type": "haruhi:flag/set", "namespace": "haruhi:example/greeter", "flag": "met", "value": 1 } ] },
+            { "text": "Have we met?", "next": "met_before",
+              "only_if": [ { "type": "haruhi:flag", "namespace": "haruhi:example/greeter", "flag": "met", "op": "set" } ],
+              "when_unavailable": "grayed_out", "unavailable_message": "You haven't met yet." }
+          ]
+        },
+        "hello_again": { "text": "Back again?", "next": "bye" },
+        "met_before": { "text": "Of course.", "next": "bye" },
+        "bye": { "text": "Safe travels." }
+      }
+    }
+  }
+}
+```
+
+Field rules (the content component enforces them, and other components rely on them):
+
+- **NPC fields:**
+  - `name` and `texture` are required.
+  - `model`, `animations`, `portrait` and `dialogue` are optional.
+  - `scale` defaults to 1.0 and must be within (0, 4].
+  - No `model` means the built-in default humanoid model, with `texture` used as a 64×64 player-layout skin.
+- **Node fields:**
+  - A node with `random` is a router. It has no `text` and no `choices`, and every weight is > 0.
+  - Any other node requires `text`.
+  - `choices`, `next` and `random` all name nodes in the same graph.
+  - `on_enter` defaults to empty.
+- **Choice fields:**
+  - A choice needs either `text` or `provider`.
+  - `when_unavailable` is `hidden` (the default) or `grayed_out`.
+  - `only_if` and `actions` default to empty.
+- **Graph and bundle rules:**
+  - `start` must exist, and every node must be reachable from it.
+  - Every `speaker` and NPC `dialogue` must exist in the bundle.
+  - A flag used by any condition or action must be declared under `flags`.
+
+The model and texture ids are client assets. The server cannot check them, so the client falls back to the default
+model and the Steve skin when one is missing.
+
+## Built-in conditions, actions and providers
+
+Registered by the dialogue component under these ids, with these arguments. The content seed bundle and every
+fixture use exactly these.
+
+| Kind | Id | Arguments |
+|---|---|---|
+| condition | `haruhi:all_of`, `haruhi:any_of` | `conditions`: array of condition specs |
+| condition | `haruhi:not` | `condition`: one condition spec |
+| condition | `haruhi:flag` | `namespace`, `flag`, `op`: `set`, `unset`, `eq`, `ne`, `gt`, `gte`, `lt` or `lte`; `value`: int (not used by `set` and `unset`) |
+| condition | `haruhi:visits` | `op` (as above, without `set` and `unset`), `value` |
+| condition | `haruhi:predicate` | `predicate`: id of a vanilla predicate (the `predicate` registry), tested on the player at the player's position |
+| condition | `haruhi:has_item` | `item`: an item id or `#tag`; `count`: int, default 1 |
+| condition | `haruhi:advancement` | `advancement`: id; `criterion`: optional name; true when done (or when that criterion is done) |
+| condition | `haruhi:tag` | `tag`: a scoreboard tag on the player |
+| condition | `haruhi:permission` | `level`: an op permission level, 0–4 |
+| condition | `haruhi:time` | `from`, `to`: day-time ticks 0–23999; the range wraps past midnight when `from` > `to` |
+| condition | `haruhi:weather` | `weather`: `clear`, `rain` or `thunder` |
+| action | `haruhi:flag/set` | `namespace`, `flag`, `value`: int, default 1 |
+| action | `haruhi:flag/add` | `namespace`, `flag`, `delta`: int, default 1 |
+| action | `haruhi:flag/clear` | `namespace`, `flag` |
+| action | `haruhi:goto` | `node` |
+| action | `haruhi:end` | none |
+| action | `haruhi:open` | `graph` |
+| action | `haruhi:animation` | `animation`: played by the interlocutor NPC |
+| action | `haruhi:sound` | `sound`: sound event id; `volume`, `pitch`: default 1 |
+| action | `haruhi:message` | `text`: text component, sent to the player's chat |
+| action | `haruhi:give` | `loot_table`: id; `once`: `{ "namespace", "flag" }`, required. Refuses if the flag is set. Otherwise it sets the flag write-through, waits for the write, then gives the loot. A crash in between loses the reward and never duplicates it. |
+| action | `haruhi:command` | `command`: run as the player at the permission level set in `config/haruhi-dialogue.json`. Only runs when the command's first word is on that file's allowlist, which is empty by default. A command not on the list is a validation error. |
+
+Haruhi registers no providers itself. The API exists for consumers such as the Guild board.

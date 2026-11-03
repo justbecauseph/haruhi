@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "haruhi",
+  "version": "${version}",
+  "name": "Haruhi",
+  "description": "Scriptable NPCs: data-driven dialogue graphs, a visual-novel dialogue screen, Blockbench (GeckoLib) models and per-character dialogue flags.",
+  "authors": [
+    "Lampas"
+  ],
+  "contact": {
+    "sources": "https://github.com/justbecauseph/haruhi"
+  },
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "town.lampas.haruhi.Haruhi"
+    ],
+    "client": [
+      "town.lampas.haruhi.client.HaruhiClient"
+    ]
+  },
+  "mixins": [
+    "haruhi.mixins.json",
+    {
+      "config": "haruhi.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "recommends": {
+    "geckolib": ">=5.5.5"
+  }
+}
