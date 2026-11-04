@@ -5,12 +5,14 @@ import com.geckolib.animatable.instance.AnimatableInstanceCache;
 import com.geckolib.animatable.manager.AnimatableManager;
 import com.geckolib.animation.AnimationController;
 import com.geckolib.animation.RawAnimation;
+import com.geckolib.animation.object.LoopType;
 import com.geckolib.animation.object.PlayState;
 import com.geckolib.cache.BakedAnimationCache;
 import com.geckolib.cache.GeckoLibResources;
 import com.geckolib.cache.animation.BakedAnimations;
 import com.geckolib.util.GeckoLibUtil;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
@@ -21,7 +23,8 @@ import town.lampas.haruhi.client.npc.NpcLookAssets;
  * each entity's animation state inside it, keyed by entity id.
  *
  * <p>The base controller loops {@code idle}, or {@code talk} while the entity is the open dialogue's speaker. The actions
- * controller plays any animation the file names when it is triggered by name, over the base.
+ * controller plays any animation the file names when it is triggered by name, over the base. A triggered animation plays
+ * once, even when the file marks it as looping, so the base takes over again when it ends.
  */
 final class NpcAnimatable implements GeoReplacedEntity {
     private static final String BASE = "base";
@@ -48,14 +51,24 @@ final class NpcAnimatable implements GeoReplacedEntity {
 
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar registrar) {
+        controllers(triggerableNames()).forEach(registrar::add);
+    }
+
+    /**
+     * The base controller, then the actions controller, which can play each of {@code triggerable} by name. It needs no
+     * baked files, so the controllers can be built without GeckoLib's resources.
+     */
+    static List<AnimationController<NpcAnimatable>> controllers(Set<String> triggerable) {
         AnimationController<NpcAnimatable> base = new AnimationController<>(BASE,
                 test -> test.setAndContinue(test.getDataOrDefault(NpcRenderData.SPEAKING, false) ? TALK : IDLE));
+        // Without receiveTriggeredAnimations the handler runs only while nothing is triggered, so a triggered animation
+        // plays instead of being stopped on its first frame.
         AnimationController<NpcAnimatable> actions =
-                new AnimationController<NpcAnimatable>(ACTIONS, test -> PlayState.STOP).receiveTriggeredAnimations();
-        for (String name : triggerableNames()) {
-            actions.triggerableAnim(name, RawAnimation.begin().thenPlay(name));
+                new AnimationController<NpcAnimatable>(ACTIONS, test -> PlayState.STOP);
+        for (String name : triggerable) {
+            actions.triggerableAnim(name, RawAnimation.begin().then(name, LoopType.PLAY_ONCE));
         }
-        registrar.add(base, actions);
+        return List.of(base, actions);
     }
 
     /**

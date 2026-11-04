@@ -17,10 +17,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.material.PushReaction;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
@@ -30,13 +32,17 @@ import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.content.model.NpcProfile;
 
 /**
- * A non-moving character. It is a living entity only so that it can carry the vanilla scale attribute and the default
- * attributes; it has no goals, never falls, is not pushed, never despawns, and takes no damage except {@code /kill} and the
- * void. Right-clicking it with the main hand faces the player and opens the profile's dialogue.
+ * A character that stays where it is. It is a living entity only so that it can carry the vanilla scale attribute and the
+ * default attributes; it has no goals, never falls, is not pushed, never despawns, and takes no damage except {@code /kill}
+ * and the void. Right-clicking it with the main hand faces the player and opens the profile's dialogue.
  *
- * <p>The profile id is saved. The look is recomputed from the active content when the profile is set, when the entity is
- * first ticked after loading, and when a content revision activates. It is synced as three vanilla string entries, so
- * the entity uses only vanilla entity data serializers, whose ids are the same on every server and client.
+ * <p>Only a teleport or a direct position change moves it. {@link #move} and {@link #setDeltaMovement} do nothing, so
+ * explosions, fishing rods, pistons, levitation and portals cannot relocate it, and splash potions do not affect it.
+ *
+ * <p>The profile id and the look are saved, so a loaded NPC shows its last look before it ticks. The look is recomputed
+ * from the active content when the profile is set, when the entity is first ticked after loading, and when a content
+ * revision activates. It is synced as three vanilla string entries, so the entity uses only vanilla entity data
+ * serializers, whose ids are the same on every server and client.
  */
 public class NpcEntity extends LivingEntity {
     static final EntityDataAccessor<String> LOOK_MODEL =
@@ -47,6 +53,9 @@ public class NpcEntity extends LivingEntity {
             SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
 
     private static final String PROFILE_KEY = "profile";
+    private static final String LOOK_MODEL_KEY = "look_model";
+    private static final String LOOK_TEXTURE_KEY = "look_texture";
+    private static final String LOOK_ANIMATIONS_KEY = "look_animations";
 
     private @Nullable Identifier profileId;
     /** True until the first tick after a load or a profile change refreshes the look from the active content. */
@@ -143,6 +152,34 @@ public class NpcEntity extends LivingEntity {
         return HumanoidArm.RIGHT;
     }
 
+    /** Ignored. Vanilla moves an entity through here for its own travel, pistons and shulkers; the NPC never moves. */
+    @Override
+    public void move(MoverType type, Vec3 movement) {}
+
+    /**
+     * Ignored, so no explosion, knockback, fishing-rod pull or levitation gives the NPC a velocity. Vanilla adds velocity
+     * through this method, and {@link #push} and {@link #knockback} go through it too.
+     */
+    @Override
+    public void setDeltaMovement(Vec3 movement) {}
+
+    @Override
+    public boolean canUsePortal(boolean allowPassengers) {
+        return false;
+    }
+
+    /** A piston passes through the NPC, as it does through an armor stand marker. */
+    @Override
+    public PushReaction getPistonPushReaction() {
+        return PushReaction.IGNORE;
+    }
+
+    /** Splash potions and potion clouds do not affect the NPC; {@code /effect} still does. */
+    @Override
+    public boolean isAffectedByPotions() {
+        return false;
+    }
+
     @Override
     public boolean isPushable() {
         return false;
@@ -167,10 +204,21 @@ public class NpcEntity extends LivingEntity {
         return false;
     }
 
+    /**
+     * Keeps the body on the yaw. Vanilla lets the body lag the yaw by up to 50 degrees, and the body is not synced, so a
+     * client would draw the NPC turned away from the way it faces. ArmorStand does the same.
+     */
+    @Override
+    protected void tickHeadTurn(float bodyTarget) {
+        yBodyRotO = yRotO;
+        yBodyRot = getYRot();
+    }
+
     @Override
     public InteractionResult interact(Player player, InteractionHand hand, Vec3 location) {
+        // Every hand consumes the interaction, so an item in the other hand (a name tag) never acts on the NPC.
         if (hand != InteractionHand.MAIN_HAND) {
-            return InteractionResult.PASS;
+            return InteractionResult.CONSUME;
         }
         if (level().isClientSide()) {
             return InteractionResult.SUCCESS;
@@ -184,14 +232,21 @@ public class NpcEntity extends LivingEntity {
         return InteractionResult.SUCCESS;
     }
 
-    /** Turns the NPC's yaw to look at {@code target}, keeping it level. */
+    /** Turns the NPC to face {@code target}, keeping it level. */
     private void faceTowards(Entity target) {
         double dx = target.getX() - getX();
         double dz = target.getZ() - getZ();
-        float yRot = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
-        setRot(yRot, 0.0F);
-        setYBodyRot(yRot);
-        setYHeadRot(yRot);
+        turnTo((float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F);
+    }
+
+    /**
+     * Turns the NPC to {@code yaw}, with its body and head. Setting only the yaw would leave the head at its random
+     * constructor value, and the spawn packet carries the head. Server thread only.
+     */
+    void turnTo(float yaw) {
+        setRot(yaw, 0.0F);
+        setYBodyRot(yaw);
+        setYHeadRot(yaw);
     }
 
     @Override
@@ -214,6 +269,9 @@ public class NpcEntity extends LivingEntity {
     protected void readAdditionalSaveData(ValueInput input) {
         super.readAdditionalSaveData(input);
         this.profileId = input.read(PROFILE_KEY, Identifier.CODEC).orElse(null);
+        entityData.set(LOOK_MODEL, input.getStringOr(LOOK_MODEL_KEY, NpcLook.DEFAULT.syncedModel()));
+        entityData.set(LOOK_TEXTURE, input.getStringOr(LOOK_TEXTURE_KEY, NpcLook.DEFAULT.syncedTexture()));
+        entityData.set(LOOK_ANIMATIONS, input.getStringOr(LOOK_ANIMATIONS_KEY, NpcLook.DEFAULT.syncedAnimations()));
         this.lookStale = true;
     }
 
@@ -223,5 +281,8 @@ public class NpcEntity extends LivingEntity {
         if (profileId != null) {
             output.store(PROFILE_KEY, Identifier.CODEC, profileId);
         }
+        output.putString(LOOK_MODEL_KEY, entityData.get(LOOK_MODEL));
+        output.putString(LOOK_TEXTURE_KEY, entityData.get(LOOK_TEXTURE));
+        output.putString(LOOK_ANIMATIONS_KEY, entityData.get(LOOK_ANIMATIONS));
     }
 }

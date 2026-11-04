@@ -1,29 +1,44 @@
 package town.lampas.haruhi.gametest;
 
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import io.netty.buffer.Unpooled;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.gametest.framework.GameTestSequence;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.material.PushReaction;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.model.ContentBundle;
@@ -42,6 +57,10 @@ import town.lampas.haruhi.npc.NpcLook;
  * {@code data/haruhi-gametest/test_environment/npc.json}). The GameTest runner puts each environment in its own batch
  * and runs batches one after another, so no other component's test changes the active content while these run, and
  * the fixture stays active across the ticks a dialogue open waits for a player's flags.
+ *
+ * <p>Every test that activates content first waits for
+ * {@link town.lampas.haruhi.content.ContentService#isStartupComplete}, so the startup activation cannot replace the
+ * fixture.
  */
 public final class NpcGameTests {
     private static final String ENVIRONMENT = "haruhi-gametest:npc";
@@ -50,50 +69,73 @@ public final class NpcGameTests {
     private static final String RESTYLED_FIXTURE = "/haruhi/fixtures/npc/npc_bundle_restyled.json";
     private static final Identifier GREETER = Identifier.fromNamespaceAndPath("haruhi", "fixture/greeter");
     private static final Identifier STYLED = Identifier.fromNamespaceAndPath("haruhi", "fixture/styled");
+    /** The look the fixture's styled profile gives its NPC: its model and animations are the styled id. */
+    private static final NpcLook STYLED_LOOK = new NpcLook(
+            Optional.of(STYLED),
+            Identifier.fromNamespaceAndPath("haruhi", "textures/npc/fixture/styled.png"),
+            Optional.of(STYLED));
 
-    @GameTest(environment = ENVIRONMENT, maxTicks = 120)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 130)
     public void npcDoesNotMoveOverOneHundredTicks(GameTestHelper helper) {
-        activateFixtures();
-        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
-        Vec3 start = npc.position();
-        helper.runAfterDelay(100, () -> {
-            helper.assertTrue(npc.position().distanceToSqr(start) < 1.0E-9, "the NPC moved on its own");
-            helper.succeed();
-        });
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.start = scene.npc.position();
+                })
+                .thenIdle(100)
+                .thenExecute(() -> helper.assertTrue(
+                        scene.npc.position().distanceToSqr(scene.start) < 1.0E-9, "the NPC moved on its own"))
+                .thenSucceed();
     }
 
-    @GameTest(environment = ENVIRONMENT, maxTicks = 1)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
     public void npcIgnoresPlayerDamageButNotKill(GameTestHelper helper) {
-        activateFixtures();
-        ServerPlayer player = mockPlayer(helper);
-        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
-        ServerLevel level = helper.getLevel();
-        DamageSource attack = level.damageSources().playerAttack(player);
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    ServerPlayer player = mockPlayer(helper);
+                    NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    ServerLevel level = helper.getLevel();
+                    DamageSource attack = level.damageSources().playerAttack(player);
 
-        float health = npc.getHealth();
-        helper.assertFalse(npc.hurtServer(level, attack, 10.0F), "the NPC accepted player damage");
-        helper.assertValueEqual(npc.getHealth(), health, "the NPC lost health to player damage");
+                    float health = npc.getHealth();
+                    helper.assertFalse(npc.hurtServer(level, attack, 10.0F), "the NPC accepted player damage");
+                    helper.assertValueEqual(npc.getHealth(), health, "the NPC lost health to player damage");
 
-        npc.kill(level);
-        helper.assertFalse(npc.isAlive(), "/kill did not remove the NPC");
-        helper.succeed();
+                    npc.kill(level);
+                    helper.assertFalse(npc.isAlive(), "/kill did not remove the NPC");
+                })
+                .thenSucceed();
     }
 
-    @GameTest(environment = ENVIRONMENT, maxTicks = 1)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
     public void profileSurvivesSaveAndLoad(GameTestHelper helper) {
-        activateFixtures();
-        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    NpcEntity loaded = saveAndLoad(helper, npc);
+                    helper.assertValueEqual(loaded.profileId().orElse(null), GREETER, "the profile was lost on load");
+                })
+                .thenSucceed();
+    }
 
-        TagValueOutput output = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
-        npc.saveWithoutId(output);
-        CompoundTag saved = output.buildResult();
-        ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, helper.getLevel().registryAccess(), saved);
-
-        NpcEntity loaded = NpcEntities.NPC.create(helper.getLevel(), EntitySpawnReason.LOAD);
-        helper.assertTrue(loaded != null, "the NPC type could not create an entity");
-        loaded.load(input);
-        helper.assertValueEqual(loaded.profileId().orElse(null), GREETER, "the profile was lost on load");
-        helper.succeed();
+    /**
+     * A loaded NPC shows its saved look before it has ticked. The chunk of an NPC that is tracked but not ticking
+     * never ticks it, so the look must come from the saved entity rather than from the first tick.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void lookSurvivesSaveAndLoadBeforeTheNpcTicks(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    NpcEntity npc = spawn(helper, STYLED, new Vec3(2.5, 2.0, 2.5));
+                    NpcEntity loaded = saveAndLoad(helper, npc);
+                    helper.assertValueEqual(loaded.look(), STYLED_LOOK, "the look of a loaded NPC before its first tick");
+                })
+                .thenSucceed();
     }
 
     /**
@@ -103,20 +145,23 @@ public final class NpcGameTests {
      */
     @GameTest(environment = ENVIRONMENT, maxTicks = 100)
     public void rightClickOpensTheDialogue(GameTestHelper helper) {
-        activateFixtures();
-        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
-        ServerPlayer player = joinNextTo(helper, npc);
+        Scene scene = new Scene();
         DialogueSessions sessions = DialogueModule.sessions();
 
-        helper.startSequence()
-                .thenWaitUntil(() -> helper.assertTrue(sessions.loadedFlags(player).isPresent(),
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.player = joinNextTo(helper, scene.npc);
+                })
+                .thenWaitUntil(() -> helper.assertTrue(sessions.loadedFlags(scene.player).isPresent(),
                         "the joined player's dialogue flags have not loaded"))
                 .thenExecute(() -> {
-                    npc.interact(player, InteractionHand.MAIN_HAND, npc.position());
-                    helper.assertTrue(HaruhiServices.dialogue().isInDialogue(player),
+                    scene.npc.interact(scene.player, InteractionHand.MAIN_HAND, scene.npc.position());
+                    helper.assertTrue(HaruhiServices.dialogue().isInDialogue(scene.player),
                             "right-click did not open the dialogue");
-                    assertTalkingTo(helper, player, npc);
-                    HaruhiServices.dialogue().close(player);
+                    assertTalkingTo(helper, scene.player, scene.npc);
+                    HaruhiServices.dialogue().close(scene.player);
                 })
                 .thenSucceed();
     }
@@ -128,23 +173,26 @@ public final class NpcGameTests {
      */
     @GameTest(environment = ENVIRONMENT, maxTicks = 100)
     public void rightClickBeforeTheFlagsLoadOpensTheDialogueOnceTheyLoad(GameTestHelper helper) {
-        activateFixtures();
-        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
-        ServerPlayer player = joinNextTo(helper, npc);
+        Scene scene = new Scene();
         DialogueSessions sessions = DialogueModule.sessions();
 
-        helper.startSequence()
-                .thenWaitUntil(() -> helper.assertTrue(sessions.loadedFlags(player).isPresent(),
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.player = joinNextTo(helper, scene.npc);
+                })
+                .thenWaitUntil(() -> helper.assertTrue(sessions.loadedFlags(scene.player).isPresent(),
                         "the joined player's dialogue flags have not loaded"))
                 .thenExecute(() -> {
                     // Drop the player's cached flags, as quitting does, so the right-click below finds them unloaded
                     // and queues its open behind a fresh load.
-                    sessions.onLeave(player);
-                    helper.assertTrue(sessions.loadedFlags(player).isEmpty(), "the player's flags are still cached");
-                    npc.interact(player, InteractionHand.MAIN_HAND, npc.position());
+                    sessions.onLeave(scene.player);
+                    helper.assertTrue(sessions.loadedFlags(scene.player).isEmpty(), "the player's flags are still cached");
+                    scene.npc.interact(scene.player, InteractionHand.MAIN_HAND, scene.npc.position());
                 })
-                .thenWaitUntil(() -> assertTalkingTo(helper, player, npc))
-                .thenExecute(() -> HaruhiServices.dialogue().close(player))
+                .thenWaitUntil(() -> assertTalkingTo(helper, scene.player, scene.npc))
+                .thenExecute(() -> HaruhiServices.dialogue().close(scene.player))
                 .thenSucceed();
     }
 
@@ -153,38 +201,176 @@ public final class NpcGameTests {
      * changes the profile sends the new look. Everything runs in one tick and the previous content is active again at
      * the end, so the other tests in the batch never see the swap.
      */
-    @GameTest(environment = ENVIRONMENT, maxTicks = 1)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
     public void lookSyncsToTrackingClientsAndFollowsContentActivation(GameTestHelper helper) {
-        ContentBundle previous = HaruhiServices.content().active();
-        try {
-            activateFixtures();
-            NpcEntity npc = spawn(helper, STYLED, new Vec3(2.5, 2.0, 2.5));
-            NpcLook styled = new NpcLook(
-                    Optional.of(Identifier.fromNamespaceAndPath("haruhi", "fixture/styled")),
-                    Identifier.fromNamespaceAndPath("haruhi", "textures/npc/fixture/styled.png"),
-                    Optional.of(Identifier.fromNamespaceAndPath("haruhi", "fixture/styled")));
-            helper.assertValueEqual(npc.look(), styled, "the server look of the styled profile");
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    ContentBundle previous = HaruhiServices.content().active();
+                    try {
+                        activateFixtures();
+                        NpcEntity npc = spawn(helper, STYLED, new Vec3(2.5, 2.0, 2.5));
+                        helper.assertValueEqual(npc.look(), STYLED_LOOK, "the server look of the styled profile");
 
-            NpcEntity tracking = NpcEntities.NPC.create(helper.getLevel(), EntitySpawnReason.LOAD);
-            helper.assertTrue(tracking != null, "the NPC type could not create an entity");
-            // What the server sends when a client starts tracking the entity.
-            receive(helper, npc, tracking, npc.getEntityData().getNonDefaultValues());
-            helper.assertValueEqual(tracking.look(), styled, "the look a tracking client receives");
+                        NpcEntity tracking = NpcEntities.NPC.create(helper.getLevel(), EntitySpawnReason.LOAD);
+                        helper.assertTrue(tracking != null, "the NPC type could not create an entity");
+                        // What the server sends when a client starts tracking the entity.
+                        receive(helper, npc, tracking, npc.getEntityData().getNonDefaultValues());
+                        helper.assertValueEqual(tracking.look(), STYLED_LOOK, "the look a tracking client receives");
 
-            npc.getEntityData().packDirty();
-            activate(RESTYLED_FIXTURE);
-            NpcLook restyled = new NpcLook(
-                    Optional.empty(),
-                    Identifier.fromNamespaceAndPath("minecraft", "textures/entity/player/slim/alex.png"),
-                    Optional.empty());
-            helper.assertValueEqual(npc.look(), restyled, "the server look after the restyled revision activated");
-            // What the server sends to tracking clients when the entity data changes.
-            receive(helper, npc, tracking, npc.getEntityData().packDirty());
-            helper.assertValueEqual(tracking.look(), restyled, "the look change a tracking client receives");
-        } finally {
-            HaruhiServices.content().activateUnstored(previous);
-        }
-        helper.succeed();
+                        npc.getEntityData().packDirty();
+                        activate(RESTYLED_FIXTURE);
+                        NpcLook restyled = new NpcLook(
+                                Optional.empty(),
+                                Identifier.fromNamespaceAndPath("minecraft", "textures/entity/player/slim/alex.png"),
+                                Optional.empty());
+                        helper.assertValueEqual(npc.look(), restyled, "the server look after the restyled revision activated");
+                        // What the server sends to tracking clients when the entity data changes.
+                        receive(helper, npc, tracking, npc.getEntityData().packDirty());
+                        helper.assertValueEqual(tracking.look(), restyled, "the look change a tracking client receives");
+                    } finally {
+                        HaruhiServices.content().activateUnstored(previous);
+                    }
+                })
+                .thenSucceed();
+    }
+
+    /** An explosion next to the NPC pushes it when vanilla knockback reaches it; the NPC must stay on its post. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
+    public void npcIsNotMovedByExplosions(GameTestHelper helper) {
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.start = scene.npc.position();
+                    Vec3 blast = helper.absoluteVec(new Vec3(2.5, 2.0, 0.5));
+                    helper.getLevel().explode(null, blast.x, blast.y, blast.z, 4.0F, Level.ExplosionInteraction.NONE);
+                })
+                .thenIdle(40)
+                .thenExecute(() -> helper.assertTrue(
+                        scene.npc.position().distanceToSqr(scene.start) < 1.0E-9, "an explosion moved the NPC"))
+                .thenSucceed();
+    }
+
+    /**
+     * Velocity from a push or set directly is never applied, a piston moves nothing, and a portal cannot take the NPC. The
+     * NPC is not pushed, as its class documents.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
+    public void npcIsNotMovedByPushesPistonsOrPortals(GameTestHelper helper) {
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.start = scene.npc.position();
+                    scene.npc.push(0.0, 1.0, 0.0);
+                    scene.npc.setDeltaMovement(0.0, 0.5, 0.0);
+                    scene.npc.move(MoverType.PISTON, new Vec3(0.0, 1.0, 0.0));
+                    helper.assertValueEqual(scene.npc.getDeltaMovement(), Vec3.ZERO, "the NPC took a velocity");
+                    helper.assertFalse(scene.npc.canUsePortal(false), "a portal can take the NPC");
+                    helper.assertValueEqual(scene.npc.getPistonPushReaction(), PushReaction.IGNORE,
+                            "a piston can push the NPC");
+                })
+                .thenIdle(40)
+                .thenExecute(() -> helper.assertTrue(
+                        scene.npc.position().distanceToSqr(scene.start) < 1.0E-9, "a push or piston moved the NPC"))
+                .thenSucceed();
+    }
+
+    /**
+     * The NPC's body follows its yaw on the server. The body is not synced, so a client that lags the body by up to 50
+     * degrees would show the NPC turned away from the player.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void bodyFollowsTheYaw(GameTestHelper helper) {
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.npc.setYRot(180.0F);
+                    scene.npc.yBodyRot = 0.0F;
+                })
+                .thenIdle(2)
+                .thenExecute(() -> {
+                    float body = scene.npc.yBodyRot;
+                    float yaw = scene.npc.getYRot();
+                    helper.assertTrue(Math.abs(Mth.wrapDegrees(body - yaw)) < 1.0E-3F,
+                            "the body (" + body + ") did not follow the yaw (" + yaw + ")");
+                })
+                .thenSucceed();
+    }
+
+    /** A spawned NPC faces the way the command source faces, with its head and body as well as its yaw. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void spawnFacesTheCommandSource(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    ServerLevel level = helper.getLevel();
+                    Vec3 at = helper.absoluteVec(new Vec3(2.5, 2.0, 2.5));
+                    List<NpcEntity> before = npcsIn(level);
+                    Optional<CommandSyntaxException> failure = runCommand(level, at, 180.0F,
+                            String.format(Locale.ROOT, "haruhi npc spawn %s %.3f %.3f %.3f", GREETER, at.x, at.y, at.z));
+                    helper.assertTrue(failure.isEmpty(),
+                            "the spawn command failed: " + failure.map(e -> e.getMessage()).orElse(""));
+
+                    List<NpcEntity> added = npcsIn(level);
+                    added.removeAll(before);
+                    helper.assertValueEqual(added.size(), 1, "the spawn command added this many NPCs");
+                    NpcEntity npc = added.get(0);
+                    helper.assertValueEqual(npc.getYRot(), 180.0F, "the spawned NPC's yaw");
+                    helper.assertValueEqual(npc.getYHeadRot(), 180.0F, "the spawned NPC's head yaw");
+                    helper.assertValueEqual(npc.yBodyRot, 180.0F, "the spawned NPC's body yaw");
+                })
+                .thenSucceed();
+    }
+
+    /** A spawn above the world is refused, as {@code /summon} refuses it, and adds no NPC. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void spawnRefusesAPositionOutsideTheWorld(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    ServerLevel level = helper.getLevel();
+                    Vec3 at = helper.absoluteVec(new Vec3(2.5, 2.0, 2.5));
+                    int before = npcsIn(level).size();
+                    Optional<CommandSyntaxException> failure = runCommand(level, at, 0.0F,
+                            "haruhi npc spawn " + GREETER + " 0 64000000 0");
+                    helper.assertTrue(failure.isPresent(), "a spawn at y=64000000 was accepted");
+                    helper.assertValueEqual(npcsIn(level).size(), before, "a refused spawn still added an NPC");
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A name tag in the off hand does not rename the NPC. A vanilla client never sends an off-hand interaction, so the
+     * server must not let a forged one reach the item.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void offHandCannotRenameAnNpc(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    ServerPlayer player = mockPlayer(helper);
+                    NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    player.setPos(npc.getX() + 1.0, npc.getY(), npc.getZ());
+                    ItemStack nameTag = new ItemStack(Items.NAME_TAG);
+                    nameTag.set(DataComponents.CUSTOM_NAME, Component.literal("Renamed"));
+                    player.setItemInHand(InteractionHand.OFF_HAND, nameTag);
+
+                    player.interactOn(npc, InteractionHand.OFF_HAND, npc.position());
+                    helper.assertValueEqual(npc.getCustomName().getString(), "Greeter",
+                            "an off-hand name tag renamed the NPC");
+                })
+                .thenSucceed();
+    }
+
+    /** Waits for the startup content activation before a test activates its own content. */
+    private static GameTestSequence afterStartupContent(GameTestHelper helper) {
+        return helper.startSequence().thenWaitUntil(() -> helper.assertTrue(
+                HaruhiServices.content().isStartupComplete(), "the startup content activation has not finished"));
     }
 
     /** Validates and activates the fixture bundle, so the NPC profiles and their dialogue exist for the tests. */
@@ -209,6 +395,19 @@ public final class NpcGameTests {
         ClientboundSetEntityDataPacket.STREAM_CODEC.encode(buffer, new ClientboundSetEntityDataPacket(sender.getId(), values));
         ClientboundSetEntityDataPacket received = ClientboundSetEntityDataPacket.STREAM_CODEC.decode(buffer);
         receiver.getEntityData().assignValues(received.packedItems());
+    }
+
+    /** Saves {@code npc} and loads the saved data into a new NPC entity, which has not been added to the level. */
+    private static NpcEntity saveAndLoad(GameTestHelper helper, NpcEntity npc) {
+        TagValueOutput output = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
+        npc.saveWithoutId(output);
+        CompoundTag saved = output.buildResult();
+        ValueInput input = TagValueInput.create(ProblemReporter.DISCARDING, helper.getLevel().registryAccess(), saved);
+
+        NpcEntity loaded = NpcEntities.NPC.create(helper.getLevel(), EntitySpawnReason.LOAD);
+        helper.assertTrue(loaded != null, "the NPC type could not create an entity");
+        loaded.load(input);
+        return loaded;
     }
 
     /** A survival player in the test level. The helper's own factory is deprecated for removal. */
@@ -245,6 +444,33 @@ public final class NpcGameTests {
         return npc;
     }
 
+    private static List<NpcEntity> npcsIn(ServerLevel level) {
+        List<NpcEntity> npcs = new ArrayList<>();
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof NpcEntity npc) {
+                npcs.add(npc);
+            }
+        }
+        return npcs;
+    }
+
+    /**
+     * Runs {@code command} as a gamemaster standing at {@code at} and facing {@code yaw}, through the server's command
+     * dispatcher. Returns the failure the command throws, or empty when it succeeds.
+     */
+    private static Optional<CommandSyntaxException> runCommand(ServerLevel level, Vec3 at, float yaw, String command) {
+        CommandSourceStack source = level.getServer().createCommandSourceStack()
+                .withLevel(level)
+                .withPosition(at)
+                .withRotation(new Vec2(0.0F, yaw));
+        try {
+            level.getServer().getCommands().getDispatcher().execute(command, source);
+            return Optional.empty();
+        } catch (CommandSyntaxException failure) {
+            return Optional.of(failure);
+        }
+    }
+
     private static String readFixture(String fixture) {
         try (InputStream in = NpcGameTests.class.getResourceAsStream(fixture)) {
             if (in == null) {
@@ -254,5 +480,12 @@ public final class NpcGameTests {
         } catch (IOException unreadable) {
             throw new UncheckedIOException(unreadable);
         }
+    }
+
+    /** What a test's first step sets up and its later steps read. */
+    private static final class Scene {
+        NpcEntity npc;
+        ServerPlayer player;
+        Vec3 start;
     }
 }

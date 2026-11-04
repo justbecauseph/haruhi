@@ -8,10 +8,10 @@ import town.lampas.haruhi.Haruhi;
 import town.lampas.haruhi.npc.NpcLook;
 
 /**
- * Turns the ids in an NPC look into resources that exist. A model or animation id names a GeckoLib file, so the file path
- * is built the way GeckoLib reads it: {@code geckolib/models/<path>.geo.json} and
- * {@code geckolib/animations/<path>.animation.json} in the id's namespace. A missing file falls back to the default
- * humanoid, and a missing texture to the Steve skin, so a profile with a bad asset still renders.
+ * Turns the ids in an NPC look into assets that exist. A model or animations id names a GeckoLib file, which GeckoLib
+ * bakes under that id. A file that fails to parse or bake is left out, so the caller asks GeckoLib whether an id is baked,
+ * not whether its file is in a resource pack. A missing model or animations file falls back to the default humanoid, and a
+ * missing texture to the Steve skin, so a profile with a bad asset still renders.
  */
 public final class NpcLookAssets {
     /** The built-in humanoid model; its file is {@code assets/haruhi/geckolib/models/humanoid.geo.json}. */
@@ -19,32 +19,26 @@ public final class NpcLookAssets {
     /** The built-in humanoid animations; its file is {@code assets/haruhi/geckolib/animations/humanoid.animation.json}. */
     public static final Identifier DEFAULT_ANIMATIONS = Haruhi.id("humanoid");
 
-    private static final String MODEL_DIRECTORY = "geckolib/models/";
-    private static final String MODEL_SUFFIX = ".geo.json";
-    private static final String ANIMATIONS_DIRECTORY = "geckolib/animations/";
-    private static final String ANIMATIONS_SUFFIX = ".animation.json";
-
     private NpcLookAssets() {}
 
-    /** The resource file GeckoLib reads for a model id. */
-    public static Identifier modelFile(Identifier model) {
-        return Identifier.fromNamespaceAndPath(model.getNamespace(), MODEL_DIRECTORY + model.getPath() + MODEL_SUFFIX);
+    /** The requested model when {@code isBaked} accepts its id, else the default humanoid. */
+    public static Identifier resolveModel(Optional<Identifier> requested, Predicate<Identifier> isBaked) {
+        return requested.filter(isBaked).orElse(DEFAULT_MODEL);
     }
 
-    /** The resource file GeckoLib reads for an animations id. */
-    public static Identifier animationsFile(Identifier animations) {
-        return Identifier.fromNamespaceAndPath(
-                animations.getNamespace(), ANIMATIONS_DIRECTORY + animations.getPath() + ANIMATIONS_SUFFIX);
-    }
-
-    /** The requested model when its file exists, else the default humanoid. */
-    public static Identifier resolveModel(Optional<Identifier> requested, Predicate<Identifier> fileExists) {
-        return requested.filter(model -> fileExists.test(modelFile(model))).orElse(DEFAULT_MODEL);
-    }
-
-    /** The requested animations when their file exists, else the default humanoid animations. */
-    public static Identifier resolveAnimations(Optional<Identifier> requested, Predicate<Identifier> fileExists) {
-        return requested.filter(animations -> fileExists.test(animationsFile(animations))).orElse(DEFAULT_ANIMATIONS);
+    /**
+     * The animations an NPC plays. A named animations id is used when {@code isBaked} accepts it, and a missing one falls
+     * back to the default humanoid. An NPC that names none plays the animations file that has the model's id when there is
+     * one, and the default humanoid otherwise.
+     *
+     * @param model the model the NPC draws, after {@link #resolveModel}
+     */
+    public static Identifier resolveAnimations(
+            Optional<Identifier> requested, Identifier model, Predicate<Identifier> isBaked) {
+        if (requested.isPresent()) {
+            return requested.filter(isBaked).orElse(DEFAULT_ANIMATIONS);
+        }
+        return isBaked.test(model) ? model : DEFAULT_ANIMATIONS;
     }
 
     /** The requested texture when it exists, else the Steve skin. */

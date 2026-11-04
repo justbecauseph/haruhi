@@ -45,6 +45,8 @@ public final class DialogueScreen extends Screen {
     private static final int ROW_HEIGHT = 16;
     private static final int ROW_GAP = 2;
     private static final int CHOICE_NUMBER_WIDTH = 16;
+    /** The space between a choice row's edges and its label. */
+    private static final int CHOICE_INSET = 6;
 
     private static final int BOX_FILL = 0xD0101018;
     private static final int BOX_EDGE = 0xFF8A7F6A;
@@ -226,20 +228,27 @@ public final class DialogueScreen extends Screen {
         int rowWidth = Math.min(boxWidth * 3 / 5, widest + CHOICE_NUMBER_WIDTH + 12);
         int right = boxX + boxWidth - PADDING;
         int left = right - rowWidth;
-        int bottom = boxY - 8;
-        int top = bottom - choices.size() * (ROW_HEIGHT + ROW_GAP);
+        int labelWidth = rowWidth - 2 * CHOICE_INSET;
+        List<ChoiceLayout.Row> rows =
+                ChoiceLayout.place(choices.size(), MARGIN, boxY - 8, ROW_HEIGHT + ROW_GAP, ROW_HEIGHT);
 
         for (int i = 0; i < choices.size(); i++) {
             ChoiceView choice = choices.get(i);
-            int y0 = top + i * (ROW_HEIGHT + ROW_GAP);
-            int y1 = y0 + ROW_HEIGHT;
+            ChoiceLayout.Row row = rows.get(i);
+            int y0 = row.y();
+            int y1 = y0 + row.height();
             boolean hovered = mouseX >= left && mouseX < right && mouseY >= y0 && mouseY < y1;
             choiceRows.add(new ChoiceRow(i, left, y0, right, y1));
 
             graphics.fill(left, y0, right, y1, hovered && choice.enabled() ? CHOICE_HOVER_FILL : CHOICE_FILL);
             int color = !choice.enabled() ? CHOICE_LOCKED_TEXT : hovered ? CHOICE_HOVER_TEXT : CHOICE_TEXT;
             String number = i < ChoiceKeys.MAX_KEYED_CHOICES ? (i + 1) + ". " : "";
-            graphics.text(font, Component.literal(number).append(choice.text()), left + 6, y0 + 4, color);
+            // The first line that fits the row. A label wider than the row is cut short, not drawn past the screen edge.
+            List<FormattedCharSequence> fitted = font.split(Component.literal(number).append(choice.text()), labelWidth);
+            if (!fitted.isEmpty()) {
+                int textY = y0 + (row.height() - font.lineHeight + 1) / 2;
+                graphics.text(font, fitted.getFirst(), left + CHOICE_INSET, textY, color);
+            }
 
             if (hovered && !choice.enabled() && choice.unavailableReason().isPresent()) {
                 graphics.setTooltipForNextFrame(font, choice.unavailableReason().get(), mouseX, mouseY);

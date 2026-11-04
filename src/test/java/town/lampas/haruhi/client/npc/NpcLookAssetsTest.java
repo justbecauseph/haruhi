@@ -9,43 +9,47 @@ import town.lampas.haruhi.npc.NpcLook;
 
 class NpcLookAssetsTest {
     private static final Identifier GREETER = Identifier.fromNamespaceAndPath("haruhi", "example/greeter");
+    private static final Identifier OTHER = Identifier.fromNamespaceAndPath("haruhi", "example/other");
     private static final Identifier SKIN = Identifier.fromNamespaceAndPath("haruhi", "textures/npc/greeter.png");
 
     @Test
-    void modelFileIsTheGeckoLibPathForTheId() {
-        assertEquals("haruhi:geckolib/models/example/greeter.geo.json",
-                NpcLookAssets.modelFile(GREETER).toString());
-    }
-
-    @Test
-    void animationsFileIsTheGeckoLibPathForTheId() {
-        assertEquals("haruhi:geckolib/animations/example/greeter.animation.json",
-                NpcLookAssets.animationsFile(GREETER).toString());
-    }
-
-    @Test
     void noRequestedModelUsesTheDefaultHumanoid() {
-        assertEquals(NpcLookAssets.DEFAULT_MODEL, NpcLookAssets.resolveModel(Optional.empty(), file -> true));
+        assertEquals(NpcLookAssets.DEFAULT_MODEL, NpcLookAssets.resolveModel(Optional.empty(), id -> true));
+    }
+
+    /** The predicate is asked about the model id, which is the key GeckoLib bakes a model under. */
+    @Test
+    void aModelGeckoLibHasBakedIsUsed() {
+        assertEquals(GREETER, NpcLookAssets.resolveModel(Optional.of(GREETER), GREETER::equals));
     }
 
     @Test
-    void aModelWhoseFileIsMissingFallsBackToTheDefaultHumanoid() {
-        assertEquals(NpcLookAssets.DEFAULT_MODEL,
-                NpcLookAssets.resolveModel(Optional.of(GREETER), file -> false));
+    void aModelGeckoLibHasNotBakedFallsBackToTheDefaultHumanoid() {
+        assertEquals(NpcLookAssets.DEFAULT_MODEL, NpcLookAssets.resolveModel(Optional.of(GREETER), id -> false));
+    }
+
+    /** A profile that names no animations plays the model's own animations file, which shares the model's id. */
+    @Test
+    void noRequestedAnimationsUsesTheModelsOwnAnimationsWhenThereAreSome() {
+        assertEquals(GREETER, NpcLookAssets.resolveAnimations(Optional.empty(), GREETER, GREETER::equals));
     }
 
     @Test
-    void aModelWhoseFileExistsIsUsed() {
-        Identifier file = NpcLookAssets.modelFile(GREETER);
-        assertEquals(GREETER, NpcLookAssets.resolveModel(Optional.of(GREETER), file::equals));
-    }
-
-    @Test
-    void animationsFallBackToTheDefaultWhenTheFileIsMissing() {
+    void noRequestedAnimationsWithoutTheModelsOwnFallsBackToTheDefaultHumanoid() {
         assertEquals(NpcLookAssets.DEFAULT_ANIMATIONS,
-                NpcLookAssets.resolveAnimations(Optional.of(GREETER), file -> false));
-        Identifier file = NpcLookAssets.animationsFile(GREETER);
-        assertEquals(GREETER, NpcLookAssets.resolveAnimations(Optional.of(GREETER), file::equals));
+                NpcLookAssets.resolveAnimations(Optional.empty(), GREETER, id -> false));
+    }
+
+    @Test
+    void requestedAnimationsAreUsedWhenTheyExist() {
+        assertEquals(OTHER, NpcLookAssets.resolveAnimations(Optional.of(OTHER), GREETER, OTHER::equals));
+    }
+
+    /** A named animations file that is missing falls back to the default humanoid, not to the model's own. */
+    @Test
+    void missingRequestedAnimationsFallBackToTheDefaultHumanoidNotToTheModelsOwn() {
+        assertEquals(NpcLookAssets.DEFAULT_ANIMATIONS,
+                NpcLookAssets.resolveAnimations(Optional.of(OTHER), GREETER, GREETER::equals));
     }
 
     @Test
