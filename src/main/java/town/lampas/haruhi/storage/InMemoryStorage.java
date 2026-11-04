@@ -9,8 +9,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 /**
@@ -26,8 +24,8 @@ final class InMemoryStorage implements HaruhiStorage {
             .reversed();
 
     private final Object lock = new Object();
-    private final ExecutorService executor = Executors.newFixedThreadPool(
-            THREADS, Thread.ofPlatform().name("haruhi-memory-storage-", 0).daemon(true).factory());
+    private final StorageExecutor executor =
+            new StorageExecutor(THREADS, "haruhi-memory-storage-", StorageSupport.SHUTDOWN_GRACE);
     private final Map<UUID, Map<FlagKey, Integer>> flags = new HashMap<>();
     private final Map<UUID, Map<VisitKey, VisitRecord>> visits = new HashMap<>();
     private final List<StoredRevision> revisions = new ArrayList<>();
@@ -139,16 +137,16 @@ final class InMemoryStorage implements HaruhiStorage {
 
     @Override
     public void close() {
-        StorageSupport.shutdown(executor);
+        executor.close();
     }
 
     /** Runs the work on the executor while holding the lock. */
     private <T> CompletableFuture<T> locked(Supplier<T> work) {
-        return CompletableFuture.supplyAsync(() -> {
+        return executor.submit(() -> {
             synchronized (lock) {
                 return work.get();
             }
-        }, executor);
+        });
     }
 
     private int indexOf(long revisionId) {

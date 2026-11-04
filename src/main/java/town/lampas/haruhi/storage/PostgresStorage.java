@@ -17,8 +17,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -28,6 +26,12 @@ import net.minecraft.resources.Identifier;
  * table names. Call {@link #migrate()} before first use.
  */
 final class PostgresStorage implements HaruhiStorage {
+    /**
+     * How long one read from the server may wait before the connection fails. A server that stops answering otherwise
+     * holds its thread and connection forever. A {@code socketTimeout} in the {@code jdbc_url} overrides this.
+     */
+    private static final int SOCKET_TIMEOUT_SECONDS = 10;
+    private static final String LOCK_ACTIVATIONS = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
     private static final String REVISION_COLUMNS = "id, digest, bundle, author, created_at, activated_at, active";
     private static final String SELECT_REVISION_BY_ID =
             "SELECT " + REVISION_COLUMNS + " FROM content_revision WHERE id = ?";
@@ -62,7 +66,7 @@ final class PostgresStorage implements HaruhiStorage {
 
     private final String schema;
     private final HikariDataSource dataSource;
-    private final ExecutorService executor;
+    private final StorageExecutor executor;
 
     PostgresStorage(String jdbcUrl, String username, String password, String schema, int poolSize) {
         if (!StorageSupport.isSchemaName(schema)) {
@@ -76,9 +80,11 @@ final class PostgresStorage implements HaruhiStorage {
         config.setSchema(schema);
         config.setMaximumPoolSize(poolSize);
         config.setPoolName("haruhi-storage");
+        // Driver defaults. The PostgreSQL driver gives a URL parameter of the same name priority over these.
+        config.addDataSourceProperty("socketTimeout", String.valueOf(SOCKET_TIMEOUT_SECONDS));
+        config.addDataSourceProperty("tcpKeepAlive", "true");
         this.dataSource = new HikariDataSource(config);
-        this.executor = Executors.newFixedThreadPool(
-                poolSize, Thread.ofPlatform().name("haruhi-storage-", 0).daemon(true).factory());
+        this.executor = new StorageExecutor(poolSize, "haruhi-storage-", StorageSupport.SHUTDOWN_GRACE);
     }
 
     /**
@@ -221,6 +227,14 @@ final class PostgresStorage implements HaruhiStorage {
     public CompletableFuture<Void> activateRevision(long revisionId, String actor, Instant at) {
         OffsetDateTime activatedAt = utc(StorageSupport.micros(at));
         return inTransaction(connection -> {
+            // Activations of one schema run one at a time. Under READ COMMITTED a statement sees only the rows
+            // committed before it began, so an activation that began while another was open would not see the other's
+            // new active row, and the unique index would reject it. The lock makes each activation begin after the
+            // previous one commits.
+            try (PreparedStatement lock = connection.prepareStatement(LOCK_ACTIVATIONS)) {
+                lock.setString(1, "haruhi.activate." + schema);
+                lock.execute();
+            }
             // The partial unique index allows one active row, so the others are cleared before the target is set.
             // If the target does not exist, the rollback restores the previously active revision.
             try (PreparedStatement deactivate = connection.prepareStatement(DEACTIVATE_OTHERS);
@@ -260,7 +274,7 @@ final class PostgresStorage implements HaruhiStorage {
 
     @Override
     public void close() {
-        StorageSupport.shutdown(executor);
+        executor.close();
         dataSource.close();
     }
 
@@ -271,18 +285,18 @@ final class PostgresStorage implements HaruhiStorage {
 
     /** Runs the work on the executor with a pooled connection in autocommit mode. */
     private <T> CompletableFuture<T> query(Work<T> work) {
-        return CompletableFuture.supplyAsync(() -> {
+        return executor.submit(() -> {
             try (Connection connection = dataSource.getConnection()) {
                 return work.apply(connection);
             } catch (SQLException e) {
                 throw new CompletionException(e);
             }
-        }, executor);
+        });
     }
 
     /** Runs the work on the executor in one transaction: committed when it returns, rolled back when it throws. */
     private <T> CompletableFuture<T> inTransaction(Work<T> work) {
-        return CompletableFuture.supplyAsync(() -> {
+        return executor.submit(() -> {
             try (Connection connection = dataSource.getConnection()) {
                 connection.setAutoCommit(false);
                 try {
@@ -300,7 +314,7 @@ final class PostgresStorage implements HaruhiStorage {
             } catch (SQLException e) {
                 throw new CompletionException(e);
             }
-        }, executor);
+        });
     }
 
     private static Optional<StoredRevision> firstRevision(PreparedStatement statement) throws SQLException {

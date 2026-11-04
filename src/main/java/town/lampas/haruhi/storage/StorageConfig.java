@@ -87,6 +87,13 @@ record StorageConfig(
         if (!root.isJsonObject()) {
             throw new IllegalArgumentException("the file must hold a JSON object");
         }
+        for (String key : root.getAsJsonObject().keySet()) {
+            // A misspelt section name would otherwise select the defaults, which is the in-memory backend.
+            if (!key.equals("storage")) {
+                throw new IllegalArgumentException(
+                        "unknown top-level key \"" + key + "\"; the only key is \"storage\"");
+            }
+        }
         JsonElement section = root.getAsJsonObject().get("storage");
         if (section == null) {
             return DEFAULT;

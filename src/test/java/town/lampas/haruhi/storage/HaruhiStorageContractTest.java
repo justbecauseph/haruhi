@@ -1,5 +1,6 @@
 package town.lampas.haruhi.storage;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -14,7 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import net.minecraft.resources.Identifier;
@@ -250,6 +251,25 @@ abstract class HaruhiStorageContractTest {
     }
 
     @Test
+    void concurrentActivationsOfDifferentRevisionsAllSucceedAndLeaveOneActive() {
+        List<StoredRevision> stored = List.of(
+                store("digest-a", T0), store("digest-b", T0), store("digest-c", T0), store("digest-d", T0));
+        List<CompletableFuture<Void>> pending = stored.stream()
+                .map(revision -> storage.activateRevision(revision.id(), "operator", T1))
+                .toList();
+        for (CompletableFuture<Void> activation : pending) {
+            await(activation);
+        }
+
+        List<Long> active = await(storage.listRevisions(10)).stream()
+                .filter(RevisionSummary::active)
+                .map(RevisionSummary::id)
+                .toList();
+        assertEquals(1, active.size());
+        assertEquals(active.get(0), await(storage.activeRevision()).orElseThrow().id());
+    }
+
+    @Test
     void revisionsListNewestFirstAndRespectTheLimit() {
         assertEquals(List.of(), await(storage.listRevisions(5)));
         StoredRevision first = store("digest-a", T0);
@@ -267,6 +287,15 @@ abstract class HaruhiStorageContractTest {
         assertInstanceOf(IllegalArgumentException.class, failure);
     }
 
+    @Test
+    void aClosedStorageFailsItsFuturesWithoutThrowing() throws Exception {
+        HaruhiStorage closed = createStorage();
+        closed.close();
+
+        CompletableFuture<Map<FlagKey, Integer>> loaded = assertDoesNotThrow(() -> closed.loadFlags(ALICE));
+        assertNotNull(failure(loaded));
+    }
+
     private StoredRevision store(String digest, Instant at) {
         return await(storage.storeRevision(digest, BUNDLE, "alice", at));
     }
@@ -280,10 +309,15 @@ abstract class HaruhiStorageContractTest {
         return future.orTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS).join();
     }
 
-    /** The cause of a future that must fail, waiting at most {@link #TIMEOUT_SECONDS}. */
+    /**
+     * The cause of a future that must fail, waiting at most {@link #TIMEOUT_SECONDS}. A future still pending then
+     * fails the test: {@code get} reports the timeout as a {@code TimeoutException}, not as an
+     * {@code ExecutionException}.
+     */
     private static Throwable failure(CompletableFuture<?> future) {
-        CompletionException thrown = assertThrows(
-                CompletionException.class, () -> future.orTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS).join());
+        ExecutionException thrown = assertThrows(ExecutionException.class,
+                () -> future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                "the future must fail within " + TIMEOUT_SECONDS + " seconds");
         assertNotNull(thrown.getCause());
         return thrown.getCause();
     }

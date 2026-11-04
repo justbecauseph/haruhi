@@ -90,12 +90,33 @@ final class PostgresMigrations {
         }
     }
 
+    /**
+     * Creates the schema and the version table when they are missing. A check comes first because PostgreSQL tests the
+     * CREATE privilege before it honours IF NOT EXISTS, so the IF NOT EXISTS form fails for a role that may use an
+     * existing schema but may not create in the database. Runs under the migration lock.
+     */
     private static void createBookkeeping(Connection connection, String schema) throws SQLException {
         try (Statement statement = connection.createStatement()) {
-            statement.execute("CREATE SCHEMA IF NOT EXISTS \"" + schema + "\"");
-            statement.execute("CREATE TABLE IF NOT EXISTS schema_version ("
-                    + "version int PRIMARY KEY, description text NOT NULL, "
-                    + "applied_at timestamptz NOT NULL DEFAULT now())");
+            if (!exists(connection, "SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ?", schema)) {
+                statement.execute("CREATE SCHEMA \"" + schema + "\"");
+            }
+            if (!exists(connection, "SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
+                    + "ON n.oid = c.relnamespace WHERE n.nspname = ? AND c.relname = ?", schema, "schema_version")) {
+                statement.execute("CREATE TABLE schema_version ("
+                        + "version int PRIMARY KEY, description text NOT NULL, "
+                        + "applied_at timestamptz NOT NULL DEFAULT now())");
+            }
+        }
+    }
+
+    private static boolean exists(Connection connection, String sql, String... parameters) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int index = 0; index < parameters.length; index++) {
+                statement.setString(index + 1, parameters[index]);
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
         }
     }
 
