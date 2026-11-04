@@ -46,6 +46,16 @@ class NpcAnimatableTest {
         GeckoLibSandbox.run(NpcAnimatableTest.class, "checkAnAnimationFromTheModelsOwnFileCanBeTriggered");
     }
 
+    @Test
+    void aClipTheFileHoldsOnItsLastFrameKeepsHoldingWhenTriggered() throws Throwable {
+        GeckoLibSandbox.run(NpcAnimatableTest.class, "checkAClipTheFileHoldsOnItsLastFrameKeepsHoldingWhenTriggered");
+    }
+
+    @Test
+    void anotherTriggerReplacesAHeldClip() throws Throwable {
+        GeckoLibSandbox.run(NpcAnimatableTest.class, "checkAnotherTriggerReplacesAHeldClip");
+    }
+
     private static void checkATriggeredAnimationPlaysAndThenEnds() throws ReflectiveOperationException {
         Npc npc = new Npc(NpcLookAssets.DEFAULT_ANIMATIONS);
         npc.frame(0.0);
@@ -79,6 +89,42 @@ class NpcAnimatableTest {
 
         assertTrue(npc.frame(0.0), "the fox's own sit did not start");
         assertEquals("sit", npc.playing());
+    }
+
+    /**
+     * The fox's {@code lie_down} is held on its last frame in its file, as Blockbench writes a "hold" animation (a pair
+     * such as taking glasses off and putting them back on). It must stay on its last frame after its 1 second, not end
+     * and hand the bones back to the base controller.
+     */
+    private static void checkAClipTheFileHoldsOnItsLastFrameKeepsHoldingWhenTriggered()
+            throws ReflectiveOperationException {
+        Npc npc = fox();
+        npc.frame(0.0);
+        npc.trigger("lie_down");
+
+        assertTrue(npc.frame(0.0), "the triggered lie_down did not start");
+        assertTrue(npc.frame(3.0 * SECOND), "the lie_down stopped holding after its 1 second");
+        assertTrue(npc.frame(30.0 * SECOND), "the lie_down stopped holding later on");
+        assertEquals("lie_down", npc.playing());
+    }
+
+    /** A held clip lasts until another animation is triggered, which then plays and ends as usual. */
+    private static void checkAnotherTriggerReplacesAHeldClip() throws ReflectiveOperationException {
+        Npc npc = fox();
+        npc.frame(0.0);
+        npc.trigger("lie_down");
+        npc.frame(0.0);
+        npc.frame(3.0 * SECOND);
+        npc.trigger("sit");
+
+        assertTrue(npc.frame(3.0 * SECOND), "the sit did not start over the held lie_down");
+        assertEquals("sit", npc.playing());
+        assertFalse(npc.frame(6.0 * SECOND), "the sit was still playing after its 1 second");
+    }
+
+    private static Npc fox() throws ReflectiveOperationException {
+        Identifier fox = Identifier.fromNamespaceAndPath("haruhi", "fixture/fox");
+        return new Npc(BakedAssets.animations(new NpcLook(Optional.of(fox), NpcLook.DEFAULT_TEXTURE, Optional.empty())));
     }
 
     /**
