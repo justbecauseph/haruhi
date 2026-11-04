@@ -269,9 +269,10 @@ public final class DialogueSessions implements DialogueService {
         }
         state.loading = true;
         state.loadFailed = false;
+        UUID id = state.player.getUUID();
         MinecraftServer server = state.player.level().getServer();
-        store.load(state.player.getUUID()).whenComplete((loaded, error) ->
-                server.execute(() -> onLoaded(state, loaded, error)));
+        store.load(id).whenComplete((loaded, error) -> ServerThread.execute(server,
+                "the flag and visit load for " + id, () -> onLoaded(state, loaded, error)));
     }
 
     private void onLoaded(PlayerState state, CharacterStore.@Nullable Loaded loaded, @Nullable Throwable error) {
@@ -356,8 +357,7 @@ public final class DialogueSessions implements DialogueService {
 
         PlayerState(ServerPlayer player, CharacterStore store) {
             this.player = player;
-            MinecraftServer server = player.level().getServer();
-            this.flags = new PlayerFlags(player.getUUID(), cache, store, server::execute);
+            this.flags = new PlayerFlags(player.getUUID(), cache, store, player.level().getServer());
         }
     }
 

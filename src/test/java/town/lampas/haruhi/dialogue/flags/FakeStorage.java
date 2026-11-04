@@ -18,16 +18,29 @@ import town.lampas.haruhi.storage.VisitRecord;
 
 /**
  * Flag storage that completes every call at once on the calling thread. {@link #failNextWrites} makes the next writes
- * fail without applying them, as a database outage would.
+ * fail without applying them, as a database outage would. {@link #holdNextWrite} leaves the next write pending until
+ * {@link #failHeldWrite} fails it, from whichever thread the test chooses.
  */
 final class FakeStorage implements HaruhiStorage {
     private final Map<UUID, Map<FlagKey, Integer>> flags = new HashMap<>();
     private final List<List<FlagChange>> writes = new ArrayList<>();
     private int failingWrites;
+    private boolean holdingNextWrite;
+    private CompletableFuture<Void> heldWrite;
 
     /** Makes the next {@code count} writes fail. */
     void failNextWrites(int count) {
         failingWrites = count;
+    }
+
+    /** Makes the next write stay pending, without applying it, until {@link #failHeldWrite} completes it. */
+    void holdNextWrite() {
+        holdingNextWrite = true;
+    }
+
+    /** Fails the write made pending by {@link #holdNextWrite}. Its callbacks run on the calling thread. */
+    void failHeldWrite(Throwable failure) {
+        heldWrite.completeExceptionally(failure);
     }
 
     /** Every write that reached storage, failed ones excluded, in order. */
@@ -47,6 +60,11 @@ final class FakeStorage implements HaruhiStorage {
 
     @Override
     public CompletableFuture<Void> writeFlags(UUID characterId, List<FlagChange> changes) {
+        if (holdingNextWrite) {
+            holdingNextWrite = false;
+            heldWrite = new CompletableFuture<>();
+            return heldWrite;
+        }
         if (failingWrites > 0) {
             failingWrites--;
             return CompletableFuture.failedFuture(new IllegalStateException("injected write failure"));

@@ -8,6 +8,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.loot.LootTable;
 import town.lampas.haruhi.Haruhi;
+import town.lampas.haruhi.dialogue.ServerThread;
 import town.lampas.haruhi.dialogue.api.ActionType;
 import town.lampas.haruhi.dialogue.api.DialogueAction;
 import town.lampas.haruhi.dialogue.api.DialogueContext;
@@ -53,13 +54,15 @@ final class GiveAction {
         // Only the UUID is kept: by the time the write completes, the entity may have died or been replaced.
         UUID playerId = player.getUUID();
         LootTable loot = table.get();
-        flags.setDurable(once, 1).whenComplete((ignored, error) -> server.execute(() -> {
+        flags.setDurable(once, 1).whenComplete((ignored, error) -> {
             if (error != null) {
                 Haruhi.LOGGER.error("{} could not write the once flag for {}; {} not given",
                         TYPE, playerId, lootTableId, error);
                 return;
             }
-            rewards.give(server, playerId, lootTableId, loot);
-        }));
+            ServerThread.execute(server, "the haruhi:give of " + lootTableId + " for " + playerId
+                    + ", whose once flag is stored, so it must be granted by hand",
+                    () -> rewards.give(server, playerId, lootTableId, loot));
+        });
     }
 }
