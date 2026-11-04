@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import net.minecraft.resources.Identifier;
@@ -293,7 +293,7 @@ abstract class HaruhiStorageContractTest {
         closed.close();
 
         CompletableFuture<Map<FlagKey, Integer>> loaded = assertDoesNotThrow(() -> closed.loadFlags(ALICE));
-        assertThrows(CompletionException.class, () -> await(loaded));
+        assertNotNull(failure(loaded));
     }
 
     private StoredRevision store(String digest, Instant at) {
@@ -309,10 +309,15 @@ abstract class HaruhiStorageContractTest {
         return future.orTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS).join();
     }
 
-    /** The cause of a future that must fail, waiting at most {@link #TIMEOUT_SECONDS}. */
+    /**
+     * The cause of a future that must fail, waiting at most {@link #TIMEOUT_SECONDS}. A future still pending then
+     * fails the test: {@code get} reports the timeout as a {@code TimeoutException}, not as an
+     * {@code ExecutionException}.
+     */
     private static Throwable failure(CompletableFuture<?> future) {
-        CompletionException thrown = assertThrows(
-                CompletionException.class, () -> future.orTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS).join());
+        ExecutionException thrown = assertThrows(ExecutionException.class,
+                () -> future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                "the future must fail within " + TIMEOUT_SECONDS + " seconds");
         assertNotNull(thrown.getCause());
         return thrown.getCause();
     }
