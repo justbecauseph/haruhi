@@ -55,9 +55,13 @@ final class Actions {
         return Args.<DialogueAction>parse(context, "haruhi:end", json, Set.of(), args -> ctx -> ctx.end());
     }
 
+    /** Opens another graph of the same bundle, so the target must be in the bundle being validated. */
     static DataResult<DialogueAction> open(JsonObject json, ParseContext context) {
         return Args.<DialogueAction>parse(context, "haruhi:open", json, Set.of("graph"), args -> {
             Identifier graph = args.id("graph");
+            if (!context.bundle().dialogues().containsKey(graph)) {
+                throw Args.invalid("graph '" + graph + "' is not in this bundle");
+            }
             return ctx -> ctx.openGraph(graph);
         });
     }

@@ -33,7 +33,8 @@ import town.lampas.haruhi.network.DialogueChoicePayload;
 /**
  * The vanilla dialog presenter. A node becomes a {@link MultiActionDialog} of choices, or a {@link NoticeDialog} with a
  * continue button. Each button is a custom click that carries the session id, node id and index, and the server
- * handles the click in {@link #handleClick}. Grayed-out choices have no action, so they cannot be picked.
+ * handles the click in {@link #handleClick}. A grayed-out choice sends the same click: the server refuses it and shows
+ * the node again, which is what the client waits for after any button press.
  */
 public final class VanillaDialogs {
     /** Custom click of a choice button: payload {@code session}, {@code node}, {@code choice}. */
@@ -99,15 +100,16 @@ public final class VanillaDialogs {
         return true;
     }
 
-    private static ActionButton choiceButton(DialogueSession session, String node, int index, VisibleChoice choice) {
+    /**
+     * One choice button. Every button carries the click, grayed out or not: a button with no action makes the client wait
+     * for a response that never comes.
+     */
+    static ActionButton choiceButton(DialogueSession session, String node, int index, VisibleChoice choice) {
         CommonButtonData data = new CommonButtonData(
                 choice.text(),
                 choice.enabled() ? Optional.empty() : choice.unavailableReason(),
                 CommonButtonData.DEFAULT_WIDTH);
-        Optional<Action> action = choice.enabled()
-                ? Optional.<Action>of(click(CHOICE_CLICK, session.id(), node, index))
-                : Optional.empty();
-        return new ActionButton(data, action);
+        return new ActionButton(data, Optional.<Action>of(click(CHOICE_CLICK, session.id(), node, index)));
     }
 
     private static StaticAction click(Identifier id, int sessionId, String node, int index) {

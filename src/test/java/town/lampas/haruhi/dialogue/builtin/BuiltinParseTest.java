@@ -13,6 +13,7 @@ import java.util.Set;
 import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 import town.lampas.haruhi.content.model.ContentBundle;
+import town.lampas.haruhi.content.model.DialogueGraph;
 import town.lampas.haruhi.content.model.FlagNamespace;
 import town.lampas.haruhi.dialogue.DialogueConfig;
 import town.lampas.haruhi.dialogue.api.DialogueAction;
@@ -34,6 +35,14 @@ class BuiltinParseTest {
             Identifier.fromNamespaceAndPath("haruhi", "test/graph"),
             "start");
 
+    private static final Identifier OTHER = Identifier.fromNamespaceAndPath("haruhi", "test/other");
+    private static final ParseContext WITH_OTHER_GRAPH = new ParseContext(
+            new ContentBundle(ContentBundle.SCHEMA,
+                    Map.of(NPC, new FlagNamespace(NPC, Set.of("met", "count"))),
+                    Map.of(), Map.of(OTHER, new DialogueGraph(OTHER, "start", Map.of()))),
+            Identifier.fromNamespaceAndPath("haruhi", "test/graph"),
+            "start");
+
     static {
         TestBuiltins.ensureRegistered();
     }
@@ -48,6 +57,10 @@ class BuiltinParseTest {
 
     private static DataResult<DialogueAction> action(String type, String args) {
         return DialogueRegistries.action(Identifier.parse(type)).orElseThrow().parse(json(args), CONTEXT);
+    }
+
+    private static DataResult<DialogueAction> actionIn(ParseContext context, String type, String args) {
+        return DialogueRegistries.action(Identifier.parse(type)).orElseThrow().parse(json(args), context);
     }
 
     private static String error(DataResult<?> result) {
@@ -223,9 +236,11 @@ class BuiltinParseTest {
     }
 
     @Test
-    void openNeedsAGraphId() {
+    void openNeedsAGraphIdThatTheBundleHas() {
         assertTrue(error(action("haruhi:open", "{\"graph\":\"Bad Id\"}")).contains("not an id"));
-        assertOk(action("haruhi:open", "{\"graph\":\"haruhi:test/other\"}"));
+        String missing = error(action("haruhi:open", "{\"graph\":\"haruhi:test/other\"}"));
+        assertTrue(missing.startsWith(WHERE) && missing.contains("'haruhi:test/other' is not in this bundle"), missing);
+        assertOk(actionIn(WITH_OTHER_GRAPH, "haruhi:open", "{\"graph\":\"haruhi:test/other\"}"));
     }
 
     @Test

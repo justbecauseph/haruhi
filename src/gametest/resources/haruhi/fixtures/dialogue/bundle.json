@@ -1,0 +1,319 @@
+{
+  "schema": 1,
+  "flags": {
+    "haruhi:fixture/clerk": [
+      "met"
+    ],
+    "haruhi:fixture/gate": [
+      "opened"
+    ],
+    "haruhi:fixture/reward": [
+      "got_reward"
+    ]
+  },
+  "npcs": {},
+  "dialogues": {
+    "haruhi:fixture/clerk": {
+      "start": "greet",
+      "nodes": {
+        "greet": {
+          "text": "Welcome to the counter.",
+          "choices": [
+            {
+              "text": "Remember me?",
+              "next": "remembered",
+              "only_if": [
+                {
+                  "type": "haruhi:flag",
+                  "namespace": "haruhi:fixture/clerk",
+                  "flag": "met",
+                  "op": "set"
+                }
+              ],
+              "when_unavailable": "hidden"
+            },
+            {
+              "text": "Tell me more.",
+              "next": "info",
+              "actions": [
+                {
+                  "type": "haruhi:flag/set",
+                  "namespace": "haruhi:fixture/clerk",
+                  "flag": "met",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "text": "Leave.",
+              "next": "bye"
+            }
+          ]
+        },
+        "remembered": {
+          "text": "Good to see you again.",
+          "next": "bye"
+        },
+        "info": {
+          "text": "We sell maps.",
+          "next": "bye"
+        },
+        "bye": {
+          "text": "Safe travels."
+        }
+      }
+    },
+    "haruhi:fixture/gate": {
+      "start": "menu",
+      "nodes": {
+        "menu": {
+          "text": "The door is locked.",
+          "choices": [
+            {
+              "text": "Locked door",
+              "next": "bye",
+              "only_if": [
+                {
+                  "type": "haruhi:flag",
+                  "namespace": "haruhi:fixture/gate",
+                  "flag": "opened",
+                  "op": "set"
+                }
+              ],
+              "when_unavailable": "grayed_out",
+              "unavailable_message": "It is locked."
+            },
+            {
+              "text": "Leave.",
+              "next": "bye"
+            }
+          ]
+        },
+        "bye": {
+          "text": "Safe travels."
+        }
+      }
+    },
+    "haruhi:fixture/reward": {
+      "start": "hand_over",
+      "nodes": {
+        "hand_over": {
+          "text": "Here is a book for you.",
+          "on_enter": [
+            {
+              "type": "haruhi:give",
+              "loot_table": "minecraft:gameplay/hero_of_the_village/librarian_gift",
+              "once": {
+                "namespace": "haruhi:fixture/reward",
+                "flag": "got_reward"
+              }
+            }
+          ],
+          "next": "bye"
+        },
+        "bye": {
+          "text": "Enjoy."
+        }
+      }
+    },
+    "haruhi:fixture/world": {
+      "start": "check",
+      "nodes": {
+        "check": {
+          "text": "What do you carry?",
+          "choices": [
+            {
+              "text": "Three apples.",
+              "next": "bye",
+              "only_if": [
+                {
+                  "type": "haruhi:has_item",
+                  "item": "minecraft:apple",
+                  "count": 3
+                }
+              ]
+            },
+            {
+              "text": "Four apples.",
+              "next": "bye",
+              "only_if": [
+                {
+                  "type": "haruhi:has_item",
+                  "item": "minecraft:apple",
+                  "count": 4
+                }
+              ]
+            },
+            {
+              "text": "Tagged.",
+              "next": "bye",
+              "only_if": [
+                {
+                  "type": "haruhi:tag",
+                  "tag": "guild_member"
+                }
+              ]
+            },
+            {
+              "text": "Anyone.",
+              "next": "bye",
+              "only_if": [
+                {
+                  "type": "haruhi:permission",
+                  "level": 0
+                }
+              ]
+            },
+            {
+              "text": "Admins only.",
+              "next": "bye",
+              "only_if": [
+                {
+                  "type": "haruhi:permission",
+                  "level": 4
+                }
+              ]
+            }
+          ]
+        },
+        "bye": {
+          "text": "Goodbye."
+        }
+      }
+    },
+    "haruhi:fixture/chain0": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 0.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain1"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain1": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 1.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain2"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain2": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 2.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain3"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain3": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 3.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain4"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain4": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 4.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain5"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain5": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 5.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain6"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain6": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 6.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain7"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain7": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 7.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain8"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain8": {
+      "start": "hop",
+      "nodes": {
+        "hop": {
+          "text": "Link 8.",
+          "on_enter": [
+            {
+              "type": "haruhi:open",
+              "graph": "haruhi:fixture/chain9"
+            }
+          ]
+        }
+      }
+    },
+    "haruhi:fixture/chain9": {
+      "start": "end",
+      "nodes": {
+        "end": {
+          "text": "The last link."
+        }
+      }
+    }
+  }
+}

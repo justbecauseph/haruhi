@@ -55,9 +55,7 @@ public final class PlayerFlags implements DurableFlags {
     @Override
     public CompletableFuture<Void> setDurable(FlagKey key, int value) {
         OptionalInt previous = cache.setFlag(key, value);
-        FlagChange change = FlagChange.set(key, value);
-        store.recordFlag(character, change);
-        CompletableFuture<Void> written = store.writeThrough(character, change);
+        CompletableFuture<Void> written = store.writeDurably(character, FlagChange.set(key, value), previous);
         written.whenComplete((ignored, error) -> {
             if (error != null) {
                 serverThread.execute(() -> cache.restoreFlag(key, value, previous));

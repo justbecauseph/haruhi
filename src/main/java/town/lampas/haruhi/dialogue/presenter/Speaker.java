@@ -11,10 +11,12 @@ import town.lampas.haruhi.content.model.NpcProfile;
 import town.lampas.haruhi.dialogue.runtime.DialogueSession;
 
 /**
- * Who a node is spoken by: the speaker's name, and the interlocutor's entity id when the interlocutor is the speaker.
- * The speaker profile is the node's own, else the interlocutor's profile, else none.
+ * Who a node is spoken by: the speaker's name and portrait, and the interlocutor's entity id when the interlocutor is the
+ * speaker. The speaker profile is the node's own, else the interlocutor's profile, else none.
+ *
+ * @param portrait the speaker profile's 2D portrait, empty when the profile has none or there is no profile
  */
-record Speaker(Component name, OptionalInt entityId) {
+record Speaker(Component name, OptionalInt entityId, Optional<Identifier> portrait) {
 
     static Speaker of(DialogueSession session, DialogueNode node) {
         Entity interlocutor = session.interlocutor();
@@ -22,13 +24,14 @@ record Speaker(Component name, OptionalInt entityId) {
                 ? Optional.empty()
                 : HaruhiServices.npc().profileId(interlocutor);
         Optional<Identifier> profile = node.speaker().or(() -> interlocutorProfile);
-        Component name = profile
-                .map(id -> session.content().npcs().get(id))
-                .map(NpcProfile::name)
-                .orElse(Component.empty());
+        Optional<NpcProfile> speaking = profile.map(id -> session.content().npcs().get(id));
+        Component name = speaking.map(NpcProfile::name).orElse(Component.empty());
         boolean interlocutorSpeaks = interlocutor != null
                 && interlocutorProfile.isPresent()
                 && profile.equals(interlocutorProfile);
-        return new Speaker(name, interlocutorSpeaks ? OptionalInt.of(interlocutor.getId()) : OptionalInt.empty());
+        return new Speaker(
+                name,
+                interlocutorSpeaks ? OptionalInt.of(interlocutor.getId()) : OptionalInt.empty(),
+                speaking.flatMap(NpcProfile::portrait));
     }
 }

@@ -37,7 +37,7 @@ import town.lampas.haruhi.storage.VisitKey;
  * those caches to load. Server thread only, except the storage callbacks, which hop back through the server.
  */
 public final class DialogueSessions implements DialogueService {
-    /** How often pending flag batches are written: every 5 seconds. */
+    /** How often pending flag batches are written, and how often a failed load is retried: every 5 seconds. */
     static final int FLUSH_INTERVAL_TICKS = 100;
     /** Most graphs one open may chain into through {@code haruhi:open}. */
     static final int MAX_OPEN_CHAIN = 8;
@@ -140,7 +140,26 @@ public final class DialogueSessions implements DialogueService {
         close(player);
     }
 
-    /** Ends sessions whose player died or whose interlocutor is gone or too far, and writes pending flags every 5 seconds. */
+    /**
+     * The player's entity was replaced by a respawn, after a death or when leaving The End. The entity that was bound to
+     * the conversation and the queued open is gone, so the conversation ends and the new entity takes over the player's
+     * state. The flags carry over.
+     */
+    public void onRespawn(ServerPlayer newPlayer) {
+        PlayerState state = players.get(newPlayer.getUUID());
+        if (state != null) {
+            state.player = newPlayer;
+        }
+        DialogueSession session = sessions.get(newPlayer.getUUID());
+        if (session != null) {
+            endSession(newPlayer, session);
+        }
+    }
+
+    /**
+     * Ends sessions whose player died or whose interlocutor is gone or too far, retries failed flag loads, and writes
+     * pending flags every 5 seconds.
+     */
     public void onTick(MinecraftServer server) {
         for (DialogueSession session : List.copyOf(sessions.values())) {
             ServerPlayer player = playerOf(session);
@@ -148,6 +167,7 @@ public final class DialogueSessions implements DialogueService {
                 endSession(player, session);
             }
         }
+        retryFailedLoads(server.getTickCount());
         if (server.getTickCount() % FLUSH_INTERVAL_TICKS == 0) {
             store.flushPending();
         }
@@ -176,6 +196,10 @@ public final class DialogueSessions implements DialogueService {
         }
         ContentBundle bundle = HaruhiServices.content().active();
         if (!bundle.dialogues().containsKey(graphId)) {
+            if (depth > 0) {
+                Haruhi.LOGGER.error("Dialogue opens {}, which is not in the active content; ending the conversation",
+                        graphId);
+            }
             return false;
         }
         close(player);
@@ -185,12 +209,12 @@ public final class DialogueSessions implements DialogueService {
             ensureLoaded(state);
             return true;
         }
-        return start(state, bundle, graphId, interlocutor, depth);
+        return start(state, player, bundle, graphId, interlocutor, depth);
     }
 
     /** Starts a loaded player's conversation: records the visit, then enters the start node. */
-    private boolean start(
-            PlayerState state, ContentBundle bundle, Identifier graphId, @Nullable Entity interlocutor, int depth) {
+    private boolean start(PlayerState state, ServerPlayer player, ContentBundle bundle, Identifier graphId,
+            @Nullable Entity interlocutor, int depth) {
         DataResult<CompiledGraph> compiledGraph = compiled.graph(bundle, graphId);
         Optional<CompiledGraph> graph = compiledGraph.result();
         if (graph.isEmpty()) {
@@ -198,7 +222,6 @@ public final class DialogueSessions implements DialogueService {
                     compiledGraph.error().map(error -> error.message()).orElse("unreadable"));
             return false;
         }
-        ServerPlayer player = state.player;
         VisitKey key = new VisitKey(graphId, npcOf(interlocutor));
         Instant now = Instant.now();
         int visits = state.cache.recordVisit(key, now);
@@ -210,23 +233,23 @@ public final class DialogueSessions implements DialogueService {
         DialogueSession session = new DialogueSession(nextSessionId(), player, interlocutor, bundle, graph.get(),
                 state.flags, visits, player.level().getRandom());
         sessions.put(player.getUUID(), session);
-        return apply(player, session, runner.start(session), depth);
+        apply(player, session, runner.start(session), depth);
+        return true;
     }
 
-    /** Carries out a step. Returns false only when the step could not start a graph. */
-    private boolean apply(ServerPlayer player, DialogueSession session, Step step, int depth) {
+    /** Carries out a step. A chained open that cannot start is logged by {@link #open}; the conversation before it stands. */
+    private void apply(ServerPlayer player, DialogueSession session, Step step, int depth) {
         if (sessions.get(player.getUUID()) != session) {
-            return true;
+            return;
         }
         if (step instanceof Step.Show show) {
             NodePresenter.show(player, session, show.node());
         } else if (step instanceof Step.Opened opened) {
             endSession(player, session);
-            return open(player, opened.graph(), session.interlocutor(), depth + 1);
+            open(player, opened.graph(), session.interlocutor(), depth + 1);
         } else {
             endSession(player, session);
         }
-        return true;
     }
 
     private void endSession(ServerPlayer player, DialogueSession session) {
@@ -235,7 +258,9 @@ public final class DialogueSessions implements DialogueService {
     }
 
     private PlayerState stateOf(ServerPlayer player) {
-        return players.computeIfAbsent(player.getUUID(), id -> new PlayerState(player, store));
+        PlayerState state = players.computeIfAbsent(player.getUUID(), id -> new PlayerState(player, store));
+        state.player = player;
+        return state;
     }
 
     private void ensureLoaded(PlayerState state) {
@@ -243,6 +268,7 @@ public final class DialogueSessions implements DialogueService {
             return;
         }
         state.loading = true;
+        state.loadFailed = false;
         MinecraftServer server = state.player.level().getServer();
         store.load(state.player.getUUID()).whenComplete((loaded, error) ->
                 server.execute(() -> onLoaded(state, loaded, error)));
@@ -255,8 +281,13 @@ public final class DialogueSessions implements DialogueService {
             return;
         }
         if (error != null || loaded == null) {
-            Haruhi.LOGGER.error("Could not load dialogue flags and visits for {}; the next open retries", id, error);
-            players.remove(id);
+            // The queued open is dropped, and the load is retried from onTick, so the flags come back without a new open.
+            MinecraftServer server = state.player.level().getServer();
+            Haruhi.LOGGER.error("Could not load dialogue flags and visits for {}; retrying in {} ticks",
+                    id, FLUSH_INTERVAL_TICKS, error);
+            state.pending = null;
+            state.loadFailed = true;
+            state.retryAtTick = server.getTickCount() + FLUSH_INTERVAL_TICKS;
             return;
         }
         state.cache.load(loaded.flags(), loaded.visits());
@@ -264,6 +295,15 @@ public final class DialogueSessions implements DialogueService {
         state.pending = null;
         if (pending != null) {
             openPending(state.player, pending);
+        }
+    }
+
+    /** Starts the failed loads whose retry time has come. A load that is already running is left alone. */
+    private void retryFailedLoads(int tick) {
+        for (PlayerState state : List.copyOf(players.values())) {
+            if (state.loadFailed && !state.loading && tick >= state.retryAtTick) {
+                ensureLoaded(state);
+            }
         }
     }
 
@@ -301,13 +341,18 @@ public final class DialogueSessions implements DialogueService {
         return Objects.requireNonNull(session.player(), "a service session always has its player");
     }
 
-    /** A player's cache, flag view and queued open, for as long as the player stays online. */
+    /**
+     * A player's cache, flag view and queued open, for as long as the player stays online. The player is the entity the
+     * server last gave the service; a respawn replaces it.
+     */
     private static final class PlayerState {
-        private final ServerPlayer player;
+        private ServerPlayer player;
         private final CharacterCache cache = new CharacterCache();
         private final PlayerFlags flags;
         private @Nullable PendingOpen pending;
         private boolean loading;
+        private boolean loadFailed;
+        private int retryAtTick;
 
         PlayerState(ServerPlayer player, CharacterStore store) {
             this.player = player;

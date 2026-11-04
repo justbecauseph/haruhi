@@ -15,6 +15,7 @@ final class DialogueNodePayloads {
 
     private DialogueNodePayloads() {}
 
+    /** The node's portrait overrides the speaker profile's, which overrides the 3D render the screen falls back to. */
     static DialogueNodePayload node(DialogueSession session, PresentedNode presented) {
         DialogueNode source = presented.node();
         Speaker speaker = Speaker.of(session, source);
@@ -31,7 +32,7 @@ final class DialogueNodePayloads {
                 speaker.name(),
                 source.text().orElse(Component.empty()),
                 source.animation(),
-                source.portrait(),
+                source.portrait().or(speaker::portrait),
                 views);
     }
 }
