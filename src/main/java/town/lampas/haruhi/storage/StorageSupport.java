@@ -1,9 +1,8 @@
 package town.lampas.haruhi.storage;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -14,7 +13,9 @@ import java.util.regex.Pattern;
  */
 final class StorageSupport {
     private static final Pattern SCHEMA_NAME = Pattern.compile("[a-z_][a-z0-9_]{0,62}");
-    private static final long SHUTDOWN_SECONDS = 10;
+
+    /** How long a closing storage lets its queued work run before it drops the rest. */
+    static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(10);
 
     private StorageSupport() {}
 
@@ -30,18 +31,5 @@ final class StorageSupport {
 
     static boolean isSchemaName(String name) {
         return SCHEMA_NAME.matcher(name).matches();
-    }
-
-    /** Stops accepting work, lets queued work finish for a few seconds, then interrupts what is left. */
-    static void shutdown(ExecutorService executor) {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(SHUTDOWN_SECONDS, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException interrupted) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 }

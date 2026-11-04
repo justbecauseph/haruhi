@@ -68,6 +68,16 @@ class StorageConfigTest {
     }
 
     @Test
+    void aMisspeltSectionNameIsRefusedSoItCannotFallBackToMemory() {
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> StorageConfig.parse("{\"Storage\": {\"type\": \"postgres\"}}"));
+
+        assertTrue(refused.getMessage().contains("Storage"));
+        assertThrows(IllegalArgumentException.class,
+                () -> StorageConfig.parse("{\"storage \": {\"type\": \"postgres\"}}"));
+    }
+
+    @Test
     void anUnknownTypeIsRefused() {
         assertThrows(IllegalArgumentException.class,
                 () -> StorageConfig.parse("{\"storage\": {\"type\": \"mysql\"}}"));

@@ -1,5 +1,6 @@
 package town.lampas.haruhi.storage;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -250,6 +251,25 @@ abstract class HaruhiStorageContractTest {
     }
 
     @Test
+    void concurrentActivationsOfDifferentRevisionsAllSucceedAndLeaveOneActive() {
+        List<StoredRevision> stored = List.of(
+                store("digest-a", T0), store("digest-b", T0), store("digest-c", T0), store("digest-d", T0));
+        List<CompletableFuture<Void>> pending = stored.stream()
+                .map(revision -> storage.activateRevision(revision.id(), "operator", T1))
+                .toList();
+        for (CompletableFuture<Void> activation : pending) {
+            await(activation);
+        }
+
+        List<Long> active = await(storage.listRevisions(10)).stream()
+                .filter(RevisionSummary::active)
+                .map(RevisionSummary::id)
+                .toList();
+        assertEquals(1, active.size());
+        assertEquals(active.get(0), await(storage.activeRevision()).orElseThrow().id());
+    }
+
+    @Test
     void revisionsListNewestFirstAndRespectTheLimit() {
         assertEquals(List.of(), await(storage.listRevisions(5)));
         StoredRevision first = store("digest-a", T0);
@@ -265,6 +285,15 @@ abstract class HaruhiStorageContractTest {
         Throwable failure = failure(storage.listRevisions(0));
 
         assertInstanceOf(IllegalArgumentException.class, failure);
+    }
+
+    @Test
+    void aClosedStorageFailsItsFuturesWithoutThrowing() throws Exception {
+        HaruhiStorage closed = createStorage();
+        closed.close();
+
+        CompletableFuture<Map<FlagKey, Integer>> loaded = assertDoesNotThrow(() -> closed.loadFlags(ALICE));
+        assertThrows(CompletionException.class, () -> await(loaded));
     }
 
     private StoredRevision store(String digest, Instant at) {
