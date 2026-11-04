@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "flags": {
+    "haruhi:example/greeter": ["met", "times_talked", "helped"]
+  },
+  "npcs": {
+    "haruhi:example/greeter": {
+      "name": "Greeter",
+      "model": "haruhi:example/greeter",
+      "texture": "minecraft:textures/entity/player/wide/steve.png",
+      "animations": "haruhi:humanoid",
+      "portrait": "haruhi:textures/portrait/greeter.png",
+      "dialogue": "haruhi:example/greeter",
+      "scale": 1.0
+    }
+  },
+  "dialogues": {
+    "haruhi:example/greeter": {
+      "start": "hello",
+      "nodes": {
+        "hello": {
+          "random": [ { "node": "hello_first", "weight": 1 }, { "node": "hello_again", "weight": 1 } ]
+        },
+        "hello_first": {
+          "speaker": "haruhi:example/greeter",
+          "text": "Welcome to Maraha.",
+          "animation": "talk",
+          "on_enter": [ { "type": "haruhi:flag/add", "namespace": "haruhi:example/greeter", "flag": "times_talked", "delta": 1 } ],
+          "choices": [
+            { "text": "Thanks.", "next": "bye", "actions": [ { "type": "haruhi:flag/set", "namespace": "haruhi:example/greeter", "flag": "met", "value": 1 } ] },
+            { "text": "Have we met?", "next": "met_before",
+              "only_if": [ { "type": "haruhi:flag", "namespace": "haruhi:example/greeter", "flag": "met", "op": "set" } ],
+              "when_unavailable": "grayed_out", "unavailable_message": "You haven't met yet." }
+          ]
+        },
+        "hello_again": { "text": "Back again?", "next": "bye" },
+        "met_before": { "text": "Of course.", "next": "bye" },
+        "bye": { "text": "Safe travels." }
+      }
+    }
+  }
+}
