@@ -61,17 +61,30 @@ public final class DialogueSessions implements DialogueService {
         return open(player, graphId, interlocutor, 0);
     }
 
+    /** Ends the player's conversation, including one still queued for their flags, which then never starts. */
     @Override
     public void close(ServerPlayer player) {
+        PlayerState state = players.get(player.getUUID());
+        if (state != null) {
+            state.pending = null;
+        }
         DialogueSession session = sessions.get(player.getUUID());
         if (session != null) {
             endSession(player, session);
         }
     }
 
+    /**
+     * True from a successful {@link #open} until the conversation ends, including while the open waits for the
+     * player's flags to load, so the answer does not depend on whether the cache was already loaded.
+     */
     @Override
     public boolean isInDialogue(ServerPlayer player) {
-        return sessions.containsKey(player.getUUID());
+        if (sessions.containsKey(player.getUUID())) {
+            return true;
+        }
+        PlayerState state = players.get(player.getUUID());
+        return state != null && state.pending != null;
     }
 
     /**
@@ -140,9 +153,10 @@ public final class DialogueSessions implements DialogueService {
         }
     }
 
-    /** Ends every session and waits, bounded, for the pending flag writes to reach storage. */
+    /** Ends every session and queued open, and waits, bounded, for the pending flag writes to reach storage. */
     public void onStopping(MinecraftServer server) {
         sessions.clear();
+        players.values().forEach(state -> state.pending = null);
         try {
             store.flushAll().get(STOP_FLUSH_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {

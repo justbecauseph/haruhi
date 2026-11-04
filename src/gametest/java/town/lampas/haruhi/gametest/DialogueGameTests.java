@@ -163,6 +163,26 @@ public final class DialogueGameTests {
                 .thenSucceed();
     }
 
+    @GameTest(maxTicks = 200)
+    public void anOpenWaitingForTheFlagsIsInDialogueAndCloseCancelsIt(GameTestHelper helper) {
+        activateFixture(helper);
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        DialogueSessions sessions = DialogueModule.sessions();
+        // The mock joined this tick, so its flags are normally still loading and the open is queued until they arrive.
+        // When the load has already finished, the open starts a session instead; both must count as in dialogue.
+        helper.assertTrue(sessions.open(player, CLERK, null), "the fixture graph should open");
+        helper.assertTrue(sessions.isInDialogue(player), "an opened conversation counts before its flags load");
+        sessions.close(player);
+        helper.assertFalse(sessions.isInDialogue(player), "close ends the conversation, queued or not");
+
+        helper.startSequence()
+                .thenWaitUntil(() -> flagsOf(helper, sessions, player))
+                .thenIdle(2)
+                .thenExecute(() -> helper.assertTrue(sessions.session(player).isEmpty(),
+                        "the closed conversation did not start once the flags loaded"))
+                .thenSucceed();
+    }
+
     @GameTest(maxTicks = 40)
     public void openingAGraphOutsideTheActiveContentReturnsFalse(GameTestHelper helper) {
         activateFixture(helper);
