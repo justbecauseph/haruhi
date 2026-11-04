@@ -14,6 +14,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.dialogue.builtin.Builtins;
+import town.lampas.haruhi.dialogue.builtin.PendingRewards;
 import town.lampas.haruhi.dialogue.command.DialogueCommands;
 import town.lampas.haruhi.dialogue.flags.CharacterStore;
 import town.lampas.haruhi.dialogue.presenter.VanillaDialogs;
@@ -34,11 +35,12 @@ public final class DialogueModule {
     public static void init() {
         Path configFile = FabricLoader.getInstance().getConfigDir().resolve(DialogueConfig.FILE_NAME);
         DialogueConfig config = DialogueConfig.load(configFile);
-        Builtins.register(config);
+        PendingRewards rewards = new PendingRewards();
+        Builtins.register(config, rewards);
         sessions = new DialogueSessions(new CharacterStore(HaruhiServices::storage));
         HaruhiServices.setDialogue(sessions);
         registerReceivers(sessions);
-        registerLifecycle(sessions);
+        registerLifecycle(sessions, rewards);
         DialogueCommands.register();
     }
 
@@ -67,7 +69,7 @@ public final class DialogueModule {
         });
     }
 
-    private static void registerLifecycle(DialogueSessions service) {
+    private static void registerLifecycle(DialogueSessions service, PendingRewards rewards) {
         ServerPlayerEvents.JOIN.register(service::onJoin);
         ServerPlayerEvents.LEAVE.register(service::onLeave);
         // A respawn replaces the ServerPlayer object, and none of the other events fire for it.
@@ -78,7 +80,10 @@ public final class DialogueModule {
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(service::onTick);
+        // haruhi:give rewards that waited for a dead or offline player are handed over once the player is back.
+        ServerTickEvents.END_SERVER_TICK.register(rewards::tick);
         ServerLifecycleEvents.SERVER_STOPPING.register(service::onStopping);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> rewards.onStopping());
     }
 
     private static void onServerThread(MinecraftServer server, Runnable task) {

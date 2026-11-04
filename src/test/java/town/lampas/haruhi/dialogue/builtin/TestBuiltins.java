@@ -17,7 +17,7 @@ final class TestBuiltins {
 
     static synchronized void ensureRegistered() {
         if (!registered) {
-            Builtins.register(new DialogueConfig(2, List.of("give", "say")));
+            Builtins.register(new DialogueConfig(2, List.of("give", "say")), new PendingRewards());
             registered = true;
         }
     }
