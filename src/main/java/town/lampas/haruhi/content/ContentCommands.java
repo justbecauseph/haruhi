@@ -17,9 +17,9 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.storage.RevisionSummary;
+import town.lampas.haruhi.storage.StoredRevision;
 
 /**
  * The {@code /haruhi content} commands, for game masters: import, validate, list, activate, rollback and status.
@@ -74,8 +74,7 @@ final class ContentCommands {
                 if (storeError != null) {
                     fail(source, storeError);
                 } else {
-                    reply(source, "Stored revision " + stored.id() + " (digest " + shortDigest(stored.digest())
-                            + "). It is not active. Run /haruhi content activate " + stored.id() + " to use it.");
+                    reply(source, storedReply(stored));
                 }
             });
         });
@@ -101,7 +100,7 @@ final class ContentCommands {
     }
 
     private static int list(CommandSourceStack source, ContentServiceImpl service) {
-        ServerThread.hop(source.getServer(), HaruhiServices.storage().listRevisions(LIST_LIMIT))
+        ServerThread.hop(source.getServer(), service.storage().listRevisions(LIST_LIMIT))
                 .whenComplete((revisions, error) -> {
                     if (error != null) {
                         fail(source, error);
@@ -148,6 +147,19 @@ final class ContentCommands {
         reply(source, "Digest: " + digest.orElse("none"));
         reply(source, "NPCs: " + bundle.npcs().size() + ", graphs: " + bundle.dialogues().size());
         return Command.SINGLE_SUCCESS;
+    }
+
+    /**
+     * The reply to an import. Storing the digest of an existing revision returns that revision, so an active one is
+     * said to be active rather than inactive.
+     */
+    static String storedReply(StoredRevision stored) {
+        String digest = "(digest " + shortDigest(stored.digest()) + ")";
+        if (stored.active()) {
+            return "Revision " + stored.id() + " " + digest + " already has this content and is active.";
+        }
+        return "Stored revision " + stored.id() + " " + digest + ". It is not active. Run /haruhi content activate "
+                + stored.id() + " to use it.";
     }
 
     private static Path configDir() {

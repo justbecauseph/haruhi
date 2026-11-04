@@ -426,4 +426,202 @@ class BundleValidatorTest {
         npc(changed).addProperty("name", "Gatekeeper");
         assertFalse(first.digest().equals(validate(changed).result().orElseThrow().digest()));
     }
+
+    // AGENTS.md: unknown keys are errors at every level, so a misspelt gate fails instead of being dropped.
+
+    @Test
+    void misspelledOnlyIfOnAChoiceIsRefused() {
+        JsonObject bundle = baseBundle();
+        JsonObject choice = node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject();
+        choice.add("onlyIf", choice.remove("only_if"));
+        assertEquals(List.of(GRAPH + "#hello, choice 1: unknown key 'onlyIf'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void unknownKeyInTheBundleIsRefused() {
+        JsonObject bundle = baseBundle();
+        bundle.addProperty("comment", "A note");
+        assertEquals(List.of("bundle: unknown key 'comment'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void unknownKeyInAnNpcIsRefused() {
+        JsonObject bundle = baseBundle();
+        npc(bundle).addProperty("portrt", "haruhi_test:textures/portrait/guard.png");
+        assertEquals(List.of("npc " + NPC + ": unknown key 'portrt'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void unknownKeyInAGraphIsRefused() {
+        JsonObject bundle = baseBundle();
+        graph(bundle).addProperty("begin", "hello");
+        assertEquals(List.of(GRAPH + ": unknown key 'begin'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void unknownKeyInANodeIsRefused() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "bye").addProperty("speak", "haruhi_test:guard");
+        assertEquals(List.of(GRAPH + "#bye: unknown key 'speak'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void unknownKeyInARandomBranchIsRefused() {
+        JsonObject bundle = baseBundle();
+        addNode(bundle, "pick", "{\"random\":[{\"node\":\"bye\",\"weight\":1,\"chance\":2}]}");
+        assertEquals(List.of(GRAPH + "#pick, random entry 1: unknown key 'chance'"), problems(validate(bundle)));
+    }
+
+    // AGENTS.md: flag namespaces and names contain no NUL character.
+
+    @Test
+    void flagNameWithANulCharacterIsRefused() {
+        JsonObject bundle = baseBundle();
+        bundle.add("flags", JsonParser.parseString("{\"haruhi_test:gate\":[\"seen\",\"se\\u0000en\"]}"));
+        assertEquals(List.of("bundle: flags 'haruhi_test:gate' must list only flag names without a NUL character"),
+                problems(validate(bundle)));
+    }
+
+    // AGENTS.md: router weights must sum to at most Integer.MAX_VALUE.
+
+    @Test
+    void routerWeightsThatAddUpPastTheIntegerLimitAreRefused() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().addProperty("next", "pick");
+        addNode(bundle, "pick",
+                "{\"random\":[{\"node\":\"bye\",\"weight\":2147483647},{\"node\":\"bye\",\"weight\":1}]}");
+        assertEquals(List.of(GRAPH + "#pick: random weights must add up to at most 2147483647"),
+                problems(validate(bundle)));
+    }
+
+    @Test
+    void routerWeightsThatAddUpToTheIntegerLimitAreAccepted() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().addProperty("next", "pick");
+        addNode(bundle, "pick",
+                "{\"random\":[{\"node\":\"bye\",\"weight\":2147483646},{\"node\":\"bye\",\"weight\":1}]}");
+        assertEquals(List.of(), problems(validate(bundle)));
+    }
+
+    // AGENTS.md: a provider exempts a graph only when it sits in a node reachable from start.
+
+    @Test
+    void aProviderInAnUnreachableNodeDoesNotExemptTheGraphFromReachability() {
+        JsonObject bundle = baseBundle();
+        addNode(bundle, "old_board",
+                "{\"text\":\"Board\",\"choices\":[{\"provider\":{\"type\":\"haruhi_test:provider\"}}]}");
+        addNode(bundle, "old_reward", "{\"text\":\"Reward\"}");
+        assertEquals(List.of(
+                GRAPH + "#old_board: node is not reachable from start 'hello'",
+                GRAPH + "#old_reward: node is not reachable from start 'hello'"), problems(validate(bundle)));
+    }
+
+    // Every problem in one pass: a spec in a node or graph that failed to parse is still checked.
+
+    @Test
+    void specProblemsInANodeThatFailedToParseAreStillReported() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").addProperty("speaker", "haruhi_test:ghost");
+        node(bundle, "hello").getAsJsonArray("on_enter").get(0).getAsJsonObject().addProperty("flag", "nope");
+
+        List<String> lines = problems(validate(bundle));
+        assertEquals(2, lines.size(), lines::toString);
+        assertEquals(Set.of(
+                GRAPH + "#hello: speaker 'haruhi_test:ghost' is not an NPC in this bundle",
+                GRAPH + "#hello: flag haruhi_test:gate/nope is not declared"), Set.copyOf(lines));
+    }
+
+    @Test
+    void specProblemsInAGraphWithoutAStartAreStillReported() {
+        JsonObject bundle = baseBundle();
+        graph(bundle).remove("start");
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonArray("only_if")
+                .add(JsonParser.parseString("{\"type\":\"haruhi_test:missing\"}"));
+
+        List<String> lines = problems(validate(bundle));
+        assertEquals(2, lines.size(), lines::toString);
+        assertEquals(Set.of(
+                GRAPH + ": start is required",
+                GRAPH + "#hello, choice 1: condition haruhi_test:missing is not registered"), Set.copyOf(lines));
+    }
+
+    // AGENTS.md: two keys that parse to the same id are an error.
+
+    @Test
+    void twoNpcKeysThatParseToTheSameIdAreRefused() {
+        JsonObject bundle = baseBundle();
+        JsonObject npcs = bundle.getAsJsonObject("npcs");
+        npcs.add("guard", JsonParser.parseString("{\"name\":\"Old guard\",\"texture\":\"" + TEXTURE + "\"}"));
+        npcs.add("minecraft:guard", JsonParser.parseString("{\"name\":\"New guard\",\"texture\":\"" + TEXTURE + "\"}"));
+        assertEquals(List.of("bundle: npcs keys 'guard' and 'minecraft:guard' both name minecraft:guard"),
+                problems(validate(bundle)));
+    }
+
+    @Test
+    void twoGraphKeysThatParseToTheSameIdAreRefused() {
+        JsonObject bundle = baseBundle();
+        JsonObject dialogues = bundle.getAsJsonObject("dialogues");
+        String graph = "{\"start\":\"hello\",\"nodes\":{\"hello\":{\"text\":\"Hi.\"}}}";
+        dialogues.add("gate", JsonParser.parseString(graph));
+        dialogues.add("minecraft:gate", JsonParser.parseString(graph));
+        assertEquals(List.of("bundle: dialogues keys 'gate' and 'minecraft:gate' both name minecraft:gate"),
+                problems(validate(bundle)));
+    }
+
+    @Test
+    void twoFlagNamespaceKeysThatParseToTheSameIdAreRefused() {
+        JsonObject bundle = baseBundle();
+        bundle.add("flags", JsonParser.parseString(
+                "{\"haruhi_test:gate\":[\"seen\"],\"x\":[\"a\"],\"minecraft:x\":[\"b\"]}"));
+        assertEquals(List.of("bundle: flags keys 'x' and 'minecraft:x' both name minecraft:x"),
+                problems(validate(bundle)));
+    }
+
+    // AGENTS.md: every haruhi:open graph must exist in the bundle. haruhi:open is a built-in this test does not
+    // register, so its own "not registered" problem may also appear; these tests look only for the graph check.
+
+    @Test
+    void openOfAGraphThatIsNotInTheBundleIsRefused() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("on_enter")
+                .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:nowhere\"}"));
+        List<String> lines = problems(validate(bundle));
+        assertTrue(lines.contains(GRAPH + "#hello: open graph 'haruhi_test:nowhere' is not a dialogue in this bundle"),
+                lines::toString);
+    }
+
+    @Test
+    void openInAChoiceOfAGraphThatIsNotInTheBundleIsRefused() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonArray("actions")
+                .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:nowhere\"}"));
+        List<String> lines = problems(validate(bundle));
+        assertTrue(lines.contains(
+                        GRAPH + "#hello, choice 1: open graph 'haruhi_test:nowhere' is not a dialogue in this bundle"),
+                lines::toString);
+    }
+
+    @Test
+    void openOfAGraphInTheBundleIsAccepted() {
+        JsonObject bundle = baseBundle();
+        bundle.getAsJsonObject("dialogues").add("haruhi_test:other",
+                JsonParser.parseString("{\"start\":\"hi\",\"nodes\":{\"hi\":{\"text\":\"Hi.\"}}}"));
+        node(bundle, "hello").getAsJsonArray("on_enter")
+                .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:other\"}"));
+        List<String> lines = problems(validate(bundle));
+        assertFalse(lines.stream().anyMatch(line -> line.contains("open graph")), lines::toString);
+    }
+
+    @Test
+    void aNodesOwnSpecProblemsComeBeforeThoseOfItsChoices() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonArray("only_if")
+                .add(JsonParser.parseString("{\"type\":\"haruhi_test:missing\"}"));
+        node(bundle, "hello").getAsJsonArray("on_enter")
+                .add(JsonParser.parseString("{\"type\":\"haruhi_test:missing_action\"}"));
+        assertEquals(List.of(
+                        GRAPH + "#hello: action haruhi_test:missing_action is not registered",
+                        GRAPH + "#hello, choice 1: condition haruhi_test:missing is not registered"),
+                problems(validate(bundle)));
+    }
 }

@@ -26,7 +26,7 @@ final class BundleValidator {
 
         Problems problems = new Problems();
         BundleReader.Read read = BundleReader.read(root.getAsJsonObject(), ops, problems);
-        BundleChecks.checkSpecs(read.bundle(), problems);
+        BundleChecks.checkSpecs(read.bundle(), read.specs(), problems);
         BundleChecks.checkReachability(read.bundle(), read.completeGraphs(), problems);
         if (!problems.isEmpty()) {
             return DataResult.error(problems::text);

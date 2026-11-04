@@ -3,8 +3,11 @@ package town.lampas.haruhi.content;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.DynamicOps;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,16 +25,24 @@ import town.lampas.haruhi.content.model.NpcProfile;
  * entry is left out of the result and its problems are recorded, so the caller can still check the rest.
  */
 final class BundleReader {
+    /** The keys a bundle object may have. Any other key is an error. */
+    static final Set<String> BUNDLE_KEYS = Set.of("schema", "flags", "npcs", "dialogues");
+    /** The keys an NPC profile may have. Any other key is an error. */
+    static final Set<String> NPC_KEYS =
+            Set.of("name", "model", "texture", "animations", "portrait", "dialogue", "scale");
+
     private BundleReader() {}
 
     /**
-     * The bundle as far as it parsed, and the ids of the graphs that parsed completely. Graphs outside
-     * {@code completeGraphs} may be missing nodes, so reachability cannot be decided for them.
+     * The bundle as far as it parsed, the ids of the graphs that parsed completely, and every condition, action and
+     * provider that parsed, including those of nodes and graphs that failed. Graphs outside {@code completeGraphs} may
+     * be missing nodes, so reachability cannot be decided for them.
      */
-    record Read(ContentBundle bundle, Set<Identifier> completeGraphs) {}
+    record Read(ContentBundle bundle, Set<Identifier> completeGraphs, List<SpecSite> specs) {}
 
     static Read read(JsonObject root, DynamicOps<JsonElement> ops, Problems problems) {
         Fields bundle = new Fields(root, "bundle", problems);
+        bundle.allowOnly(BUNDLE_KEYS);
         bundle.required("schema", JsonValues::integer)
                 .filter(schema -> schema != ContentBundle.SCHEMA)
                 .ifPresent(schema -> bundle.add("schema " + schema + " is not supported, this build reads schema "
@@ -45,17 +56,24 @@ final class BundleReader {
         Set<Identifier> graphIds = ids(graphEntries.keySet());
 
         Map<Identifier, NpcProfile> npcs = new LinkedHashMap<>();
+        Map<Identifier, String> npcKeys = new HashMap<>();
         for (Map.Entry<String, JsonElement> entry : npcEntries.entrySet()) {
             Identifier id = Identifier.tryParse(entry.getKey());
             if (id == null) {
                 problems.add("bundle", "npcs key '" + entry.getKey() + "' is not a valid id");
                 continue;
             }
-            readNpc(id, entry.getValue(), graphIds, ops, problems).ifPresent(npc -> npcs.put(id, npc));
+            boolean first = claim(npcKeys, id, entry.getKey(), "npcs", problems);
+            Optional<NpcProfile> npc = readNpc(id, entry.getValue(), graphIds, ops, problems);
+            if (first) {
+                npc.ifPresent(profile -> npcs.put(id, profile));
+            }
         }
 
-        GraphReader graphReader = new GraphReader(ops, problems, npcIds);
+        List<SpecSite> specs = new ArrayList<>();
+        GraphReader graphReader = new GraphReader(ops, problems, npcIds, graphIds, specs);
         Map<Identifier, DialogueGraph> graphs = new LinkedHashMap<>();
+        Map<Identifier, String> graphKeys = new HashMap<>();
         Set<Identifier> complete = new HashSet<>();
         for (Map.Entry<String, JsonElement> entry : graphEntries.entrySet()) {
             Identifier id = Identifier.tryParse(entry.getKey());
@@ -63,15 +81,32 @@ final class BundleReader {
                 problems.add("bundle", "dialogues key '" + entry.getKey() + "' is not a valid id");
                 continue;
             }
+            boolean first = claim(graphKeys, id, entry.getKey(), "dialogues", problems);
             GraphReader.Read read = graphReader.read(id, entry.getValue());
-            read.graph().ifPresent(graph -> graphs.put(id, graph));
-            if (read.complete()) {
-                complete.add(id);
+            if (first) {
+                read.graph().ifPresent(graph -> graphs.put(id, graph));
+                if (read.complete()) {
+                    complete.add(id);
+                }
             }
         }
 
         ContentBundle partial = new ContentBundle(ContentBundle.SCHEMA, flags, npcs, graphs);
-        return new Read(partial, Set.copyOf(complete));
+        return new Read(partial, Set.copyOf(complete), List.copyOf(specs));
+    }
+
+    /**
+     * Records that {@code key} names {@code id}. When an earlier key of the same section already names it, records a
+     * problem and returns false, so the later entry does not replace the earlier one.
+     */
+    private static boolean claim(
+            Map<Identifier, String> claimed, Identifier id, String key, String section, Problems problems) {
+        String earlier = claimed.putIfAbsent(id, key);
+        if (earlier == null) {
+            return true;
+        }
+        problems.add("bundle", section + " keys '" + earlier + "' and '" + key + "' both name " + id);
+        return false;
     }
 
     /** The members of an object-valued section, or none when the section is absent or not an object. */
@@ -93,34 +128,43 @@ final class BundleReader {
 
     private static Map<String, FlagNamespace> readFlags(Map<String, JsonElement> entries, Problems problems) {
         Map<String, FlagNamespace> flags = new LinkedHashMap<>();
+        Map<Identifier, String> claimed = new HashMap<>();
         for (Map.Entry<String, JsonElement> entry : entries.entrySet()) {
             String namespace = entry.getKey();
-            if (Identifier.tryParse(namespace) == null) {
+            Identifier id = Identifier.tryParse(namespace);
+            if (id == null) {
                 problems.add("bundle", "flags key '" + namespace + "' is not a valid id");
                 continue;
             }
+            boolean first = claim(claimed, id, namespace, "flags", problems);
             Optional<Set<String>> names = readFlagNames(namespace, entry.getValue(), problems);
-            names.ifPresent(set -> flags.put(namespace, new FlagNamespace(namespace, set)));
+            if (first) {
+                names.ifPresent(set -> flags.put(namespace, new FlagNamespace(namespace, set)));
+            }
         }
         return flags;
     }
 
+    /**
+     * The valid flag names of a namespace. Empty when the value is not an array at all. Each bad name is a problem, and
+     * the good names are kept, so one bad name does not make every use of the others look undeclared.
+     */
     private static Optional<Set<String>> readFlagNames(String namespace, JsonElement value, Problems problems) {
         if (!value.isJsonArray()) {
             problems.add("bundle", "flags '" + namespace + "' must be an array of flag names");
             return Optional.empty();
         }
         Set<String> names = new HashSet<>();
-        boolean valid = true;
         for (JsonElement name : value.getAsJsonArray()) {
             if (!JsonValues.isString(name) || name.getAsString().isEmpty()) {
                 problems.add("bundle", "flags '" + namespace + "' must list only non-empty flag names");
-                valid = false;
+            } else if (name.getAsString().indexOf('\0') >= 0) {
+                problems.add("bundle", "flags '" + namespace + "' must list only flag names without a NUL character");
             } else {
                 names.add(name.getAsString());
             }
         }
-        return valid ? Optional.of(names) : Optional.empty();
+        return Optional.of(names);
     }
 
     private static Optional<NpcProfile> readNpc(
@@ -136,6 +180,7 @@ final class BundleReader {
         }
         int mark = problems.count();
         Fields fields = new Fields(value.getAsJsonObject(), where, problems);
+        fields.allowOnly(NPC_KEYS);
 
         Optional<Component> name = fields.required("name", JsonValues.text(ops));
         Optional<Identifier> texture = fields.required("texture", JsonValues::identifier);
