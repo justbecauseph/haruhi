@@ -30,7 +30,6 @@ sourceSets {
 dependencies {
 	// Gson at the version Minecraft 26.2 ships. The tools source set has no Minecraft classpath of its own.
 	toolsImplementation 'com.google.code.gson:gson:2.14.0'
-	testImplementation 'com.google.code.gson:gson:2.14.0'
 
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"

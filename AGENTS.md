@@ -224,11 +224,14 @@ store Bedrock signs), loop modes, and catmullrom and step keyframes as Bedrock `
 
 - **Textures:** per-texture `uv_width`/`uv_height`, else the project resolution. One used texture is copied and keeps
   its UV space. Several used textures are stitched into one atlas in pixels, with each face's UV remapped and scaled.
-  Textures no face uses are left out. Animated textures keep their first frame.
+  Textures no face uses are left out. In the formats that set `animated_textures` (free, java_block, bedrock,
+  bedrock_block, bedrock_old, image), an animated texture keeps its first frame; the other formats keep the whole image.
 - **Bones:** outliner groups; elements at the root go in a first bone, `bb_main`. Names are reduced to `[A-Za-z0-9_.-]`
   and made unique with a number suffix (the first keeps its name). Animators follow the renamed bones.
 - **Box UV:** kept when GeckoLib can draw it as Blockbench does. A box UV cube with a face that is not drawn, faces on
-  different textures, a scaled texture or a fractional size is written per face instead.
+  different textures, a scaled texture, or a fractional size in modded_entity (`box_uv_float_size`) is written per face
+  instead. Elsewhere the size is floored and the cube stays box UV, except a size that float noise leaves within 1e-7
+  below a whole number, which is written per face.
 - **Skipped, with a warning:** meshes, locators, null objects, texture meshes and other non-cube elements; faces with
   texture `null`; effect (sound, particle, timeline) keyframes; animators of non-bone elements.
 - **Changed, with a warning:** bezier keyframes are written linear (Blockbench samples the curve); quaternion

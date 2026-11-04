@@ -400,13 +400,21 @@ final class GeometryCompiler {
         }
 
         boolean boxUv = BbProject.bool(json, "box_uv", project.projectBoxUv);
-        boolean mirrorUv = BbProject.bool(json, "mirror_uv", false);
+        // The file's mirror_uv after processCompatibility (BbProject.Element.mirrorUv).
+        boolean mirrorUv = element.mirrorUv;
         if (boxUv) {
             String reason = boxUvProblem(textures, size, atlas);
             if (reason == null) {
                 double[] uvOffset = json.has("uv_offset") ? BbProject.vector(json.getAsJsonArray("uv_offset"), 2, null)
                         : new double[2];
                 TextureAtlas.Placement placement = atlas.placement(textures[0]);
+                if (atlas.stitched()) {
+                    // The six box faces are checked the way the per-face rectangles are below.
+                    double[][] boxRects = boxUvRects(json, size, mirrorUv);
+                    for (int i = 0; i < FACES.length; i++) {
+                        warnIfOutside(element, FACES[i], boxRects[i], placement);
+                    }
+                }
                 // "template.uv = cube.uv_offset; if (cube.mirror_uv === !bone.mirror) template.mirror = cube.mirror_uv"
                 cube.add("uv", array(placement.u(uvOffset[0]), placement.v(uvOffset[1])));
                 if (mirrorUv == !boneMirror) {
@@ -425,9 +433,8 @@ final class GeometryCompiler {
             }
             TextureAtlas.Placement placement = atlas.placement(textures[i]);
             double[] rect = rects[i];
-            if (atlas.stitched() && outside(rect, placement)) {
-                report.warn("face UV reaches outside its texture, so in the atlas it shows part of another texture",
-                        element.name + " " + FACES[i] + " (" + placement.name() + ")");
+            if (atlas.stitched()) {
+                warnIfOutside(element, FACES[i], rect, placement);
             }
             double u = placement.u(rect[0]);
             double v = placement.v(rect[1]);
@@ -539,6 +546,14 @@ final class GeometryCompiler {
                     face[1] + face[3] + offset[1]};
         }
         return rects;
+    }
+
+    /** A face rectangle that reaches past its texture's UV space would show part of a neighbouring texture in the atlas. */
+    private void warnIfOutside(Element element, String face, double[] rect, TextureAtlas.Placement placement) {
+        if (outside(rect, placement)) {
+            report.warn("face UV reaches outside its texture, so in the atlas it shows part of another texture",
+                    element.name + " " + face + " (" + placement.name() + ")");
+        }
     }
 
     private static boolean outside(double[] rect, TextureAtlas.Placement placement) {
