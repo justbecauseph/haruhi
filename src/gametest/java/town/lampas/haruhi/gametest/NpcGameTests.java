@@ -25,6 +25,8 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.util.Mth;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
@@ -406,6 +408,85 @@ public final class NpcGameTests {
     }
 
     /**
+     * Every /haruhi npc command is for gamemasters. A source with no permissions is refused each one, and nothing they
+     * name changes: no NPC is added, the profile stays, and the NPC is not removed.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void npcCommandsRefuseASourceWithNoPermissions(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    ServerLevel level = helper.getLevel();
+                    NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    int before = npcsIn(level).size();
+                    // The source runs as the NPC, so @s selects it and no other NPC left in the test area.
+                    CommandSourceStack player = consoleSourceAt(level, npc.position(), 0.0F)
+                            .withEntity(npc)
+                            .withPermission(PermissionSet.NO_PERMISSIONS);
+
+                    for (String command : new String[] {
+                            "haruhi npc spawn " + STYLED, "haruhi npc set @s " + STYLED, "haruhi npc remove @s",
+                            "haruhi npc list"}) {
+                        helper.assertTrue(runCommand(player, command).isPresent(),
+                                "a source with no permissions ran: " + command);
+                    }
+                    helper.assertValueEqual(npcsIn(level).size(), before,
+                            "a refused npc command changed the NPCs in the level");
+                    helper.assertValueEqual(npc.profileId().orElse(null), GREETER,
+                            "a refused npc set changed the NPC's profile");
+                    helper.assertFalse(npc.isRemoved(), "a refused npc remove removed the NPC");
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A gamemaster runs each /haruhi npc command and sees its effect: spawn adds an NPC with the profile, set changes
+     * that profile, list runs, and remove takes the NPC out of the level.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void gamemasterRunsEveryNpcCommand(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    ServerLevel level = helper.getLevel();
+                    Vec3 at = helper.absoluteVec(new Vec3(2.5, 2.0, 2.5));
+                    List<NpcEntity> before = npcsIn(level);
+                    CommandSourceStack gamemaster = consoleSourceAt(level, at, 0.0F)
+                            .withPermission(LevelBasedPermissionSet.GAMEMASTER);
+
+                    Optional<CommandSyntaxException> spawned = runCommand(gamemaster, "haruhi npc spawn " + GREETER);
+                    helper.assertTrue(spawned.isEmpty(),
+                            "the spawn command failed: " + spawned.map(e -> e.getMessage()).orElse(""));
+                    List<NpcEntity> added = npcsIn(level);
+                    added.removeAll(before);
+                    helper.assertValueEqual(added.size(), 1, "the spawn command added this many NPCs");
+                    NpcEntity npc = added.get(0);
+                    helper.assertValueEqual(npc.profileId().orElse(null), GREETER, "the spawned NPC's profile");
+
+                    // The source runs as the new NPC, so @s selects it.
+                    CommandSourceStack asNpc = consoleSourceAt(level, npc.position(), 0.0F)
+                            .withEntity(npc)
+                            .withPermission(LevelBasedPermissionSet.GAMEMASTER);
+                    Optional<CommandSyntaxException> set = runCommand(asNpc, "haruhi npc set @s " + STYLED);
+                    helper.assertTrue(set.isEmpty(),
+                            "the set command failed: " + set.map(e -> e.getMessage()).orElse(""));
+                    helper.assertValueEqual(npc.profileId().orElse(null), STYLED, "the profile after the set command");
+
+                    Optional<CommandSyntaxException> listed = runCommand(asNpc, "haruhi npc list");
+                    helper.assertTrue(listed.isEmpty(),
+                            "the list command failed: " + listed.map(e -> e.getMessage()).orElse(""));
+
+                    Optional<CommandSyntaxException> removed = runCommand(asNpc, "haruhi npc remove @s");
+                    helper.assertTrue(removed.isEmpty(),
+                            "the remove command failed: " + removed.map(e -> e.getMessage()).orElse(""));
+                    helper.assertTrue(npc.isRemoved(), "the remove command did not remove the NPC");
+                    helper.assertValueEqual(npcsIn(level).size(), before.size(),
+                            "the remove command changed the number of NPCs in the level");
+                })
+                .thenSucceed();
+    }
+
+    /**
      * A name tag in the off hand does not rename the NPC. A vanilla client never sends an off-hand interaction, so the
      * server must not let a forged one reach the item.
      */
@@ -524,16 +605,31 @@ public final class NpcGameTests {
     }
 
     /**
-     * Runs {@code command} as a gamemaster standing at {@code at} and facing {@code yaw}, through the server's command
-     * dispatcher. Returns the failure the command throws, or empty when it succeeds.
+     * The server console's source, which has every permission, standing at {@code at} and facing {@code yaw} in
+     * {@code level}. A test narrows it with {@code withPermission} or {@code withEntity} before running a command.
      */
-    private static Optional<CommandSyntaxException> runCommand(ServerLevel level, Vec3 at, float yaw, String command) {
-        CommandSourceStack source = level.getServer().createCommandSourceStack()
+    private static CommandSourceStack consoleSourceAt(ServerLevel level, Vec3 at, float yaw) {
+        return level.getServer().createCommandSourceStack()
                 .withLevel(level)
                 .withPosition(at)
                 .withRotation(new Vec2(0.0F, yaw));
+    }
+
+    /**
+     * Runs {@code command} as the server console standing at {@code at} and facing {@code yaw}, through the server's
+     * command dispatcher. Returns the failure the command throws, or empty when it succeeds.
+     */
+    private static Optional<CommandSyntaxException> runCommand(ServerLevel level, Vec3 at, float yaw, String command) {
+        return runCommand(consoleSourceAt(level, at, yaw), command);
+    }
+
+    /**
+     * Runs {@code command} from {@code source} through the server's command dispatcher. Returns the failure the command
+     * throws, or empty when it succeeds.
+     */
+    private static Optional<CommandSyntaxException> runCommand(CommandSourceStack source, String command) {
         try {
-            level.getServer().getCommands().getDispatcher().execute(command, source);
+            source.getServer().getCommands().getDispatcher().execute(command, source);
             return Optional.empty();
         } catch (CommandSyntaxException failure) {
             return Optional.of(failure);
