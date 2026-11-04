@@ -1,0 +1,36 @@
+{
+  "format_version": "1.12.0",
+  "minecraft:geometry": [
+    {
+      "description": {
+        "identifier": "geometry.fixture_hollow_head",
+        "texture_width": 64,
+        "texture_height": 64
+      },
+      "bones": [
+        {
+          "name": "body",
+          "pivot": [0, 24, 0],
+          "cubes": [{ "origin": [-4, 12, -2], "size": [8, 12, 4], "uv": [0, 0] }]
+        },
+        {
+          "name": "HEAD",
+          "parent": "body",
+          "pivot": [0, 24, 0]
+        },
+        {
+          "name": "skull",
+          "parent": "HEAD",
+          "pivot": [0, 24, 0],
+          "cubes": [{ "origin": [-4, 24, -4], "size": [8, 8, 8], "uv": [0, 16] }]
+        },
+        {
+          "name": "ear",
+          "parent": "skull",
+          "pivot": [0, 32, 0],
+          "cubes": [{ "origin": [-1, 32, -1], "size": [2, 4, 2], "uv": [32, 16] }]
+        }
+      ]
+    }
+  ]
+}

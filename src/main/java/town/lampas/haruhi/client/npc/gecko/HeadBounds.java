@@ -20,7 +20,10 @@ import town.lampas.haruhi.client.npc.HeadshotFraming;
 /**
  * Finds the head of a baked GeckoLib model, for framing the dialogue headshot: the first bone, depth first from the top
  * level, whose name is {@code head} in any case (the default humanoid names it {@code head}, Figura-style models
- * {@code Head}), and the box around the cubes of that bone and of every bone under it.
+ * {@code Head}), and the box around that bone's own cubes. The bones under the head are left out, because in real models
+ * they hold long hair, antennae, ears and wings, which would shrink the face to a corner of the frame; a snout or a hat
+ * layer in a child bone is left out with them. Only when the head bone has no cubes of its own is the box taken around
+ * the cubes of every bone under it.
  *
  * <p>The box is in the rest pose. Each bone's and each cube's own rotation about its pivot is applied the way GeckoLib's
  * renderer applies it, through GeckoLib's own pivot and rotation helpers, but no animation is, so an idle or talk
@@ -47,9 +50,14 @@ final class HeadBounds {
         }
         PoseStack pose = new PoseStack();
         applyAncestors(pose, head.parent());
-        Bounds bounds = new Bounds();
-        add(pose, head, bounds);
-        return bounds.box();
+        Bounds own = new Bounds();
+        add(pose, head, own, false);
+        if (own.box().isPresent()) {
+            return own.box();
+        }
+        Bounds all = new Bounds();
+        add(pose, head, all, true);
+        return all.box();
     }
 
     private static @Nullable GeoBone find(GeoBone[] bones) {
@@ -81,7 +89,7 @@ final class HeadBounds {
         bone.translateAwayFromPivotPoint(pose);
     }
 
-    private static void add(PoseStack pose, GeoBone bone, Bounds bounds) {
+    private static void add(PoseStack pose, GeoBone bone, Bounds bounds, boolean withChildren) {
         pose.pushPose();
         applyRest(pose, bone);
         if (bone instanceof CuboidGeoBone cuboid) {
@@ -94,8 +102,10 @@ final class HeadBounds {
                 pose.popPose();
             }
         }
-        for (GeoBone child : bone.children()) {
-            add(pose, child, bounds);
+        if (withChildren) {
+            for (GeoBone child : bone.children()) {
+                add(pose, child, bounds, true);
+            }
         }
         pose.popPose();
     }

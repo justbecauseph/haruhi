@@ -17,14 +17,19 @@ class HeadBoundsTest {
     private static final double EPSILON = 1.0E-5;
 
     @Test
-    void theHumanoidHeadIsItsHeadCubeAndItsHatLayer() throws Throwable {
-        GeckoLibSandbox.run(HeadBoundsTest.class, "checkTheHumanoidHeadIsItsHeadCubeAndItsHatLayer");
+    void theHumanoidHeadIsItsHeadCubeWithoutTheHatLayer() throws Throwable {
+        GeckoLibSandbox.run(HeadBoundsTest.class, "checkTheHumanoidHeadIsItsHeadCubeWithoutTheHatLayer");
     }
 
     @Test
-    void aCapitalisedHeadBoneIsFoundWithItsChildrenAndTheRotationsAboveAndInsideIt() throws Throwable {
+    void aCapitalisedHeadBoneIsFoundWithTheRotationsAboveItAndWithoutItsChildren() throws Throwable {
         GeckoLibSandbox.run(HeadBoundsTest.class,
-                "checkACapitalisedHeadBoneIsFoundWithItsChildrenAndTheRotationsAboveAndInsideIt");
+                "checkACapitalisedHeadBoneIsFoundWithTheRotationsAboveItAndWithoutItsChildren");
+    }
+
+    @Test
+    void aHeadBoneWithoutCubesIsBoxedAroundTheBonesUnderIt() throws Throwable {
+        GeckoLibSandbox.run(HeadBoundsTest.class, "checkAHeadBoneWithoutCubesIsBoxedAroundTheBonesUnderIt");
     }
 
     @Test
@@ -38,38 +43,49 @@ class HeadBoundsTest {
     }
 
     /**
-     * {@code humanoid.geo.json}: the head bone's cube is 8 pixels from (-4, 24, -4), and its child {@code hat} is the same
-     * cube inflated by half a pixel, so the box runs from -4.5 to 4.5 across and deep, and from 23.5 to 32.5 up.
+     * {@code humanoid.geo.json}: the head bone's cube is 8 pixels from (-4, 24, -4). Its child {@code hat}, the same cube
+     * inflated by half a pixel, is a child bone and is left out, so the box is the head cube: -4 to 4 across and deep,
+     * 24 to 32 up.
      */
-    private static void checkTheHumanoidHeadIsItsHeadCubeAndItsHatLayer() {
+    private static void checkTheHumanoidHeadIsItsHeadCubeWithoutTheHatLayer() {
         HeadshotFraming.Box head = HeadBounds.forModel(NpcLookAssets.DEFAULT_MODEL).orElseThrow();
-        assertEquals(-4.5 / 16, head.minX(), EPSILON);
-        assertEquals(4.5 / 16, head.maxX(), EPSILON);
-        assertEquals(23.5 / 16, head.minY(), EPSILON);
-        assertEquals(32.5 / 16, head.maxY(), EPSILON);
-        assertEquals(-4.5 / 16, head.minZ(), EPSILON);
-        assertEquals(4.5 / 16, head.maxZ(), EPSILON);
+        assertEquals(-4.0 / 16, head.minX(), EPSILON);
+        assertEquals(4.0 / 16, head.maxX(), EPSILON);
+        assertEquals(24.0 / 16, head.minY(), EPSILON);
+        assertEquals(32.0 / 16, head.maxY(), EPSILON);
+        assertEquals(-4.0 / 16, head.minZ(), EPSILON);
+        assertEquals(4.0 / 16, head.maxZ(), EPSILON);
     }
 
     /**
      * {@code capital_head.geo.json}: the bone is {@code Head}, under {@code Body} under {@code root}. Its cube is 6 pixels
-     * from (-3, 18, -3). Its child {@code Snout} is a 2x2x4 cube from (-1, 19, -7), turned a quarter about Y around
-     * (0, 20, -3), which puts it 4 pixels out to one side and from -4 to -2 deep. {@code root} turns everything a half
-     * about Y, which flips depth to run from -3 to 4. {@code Body}, from y 6 to 18, is not part of the head.
-     *
-     * <p>Which side the snout ends up on depends on GeckoLib's mirroring of X, so only the widths of the two sides are
-     * checked across.
+     * from (-3, 18, -3), so 18 to 24 up and -3 to 3 across and deep. Its child {@code Snout}, which would reach 4 pixels
+     * out after its quarter turn, is a child bone and is left out. {@code Body}, from y 6 to 18, is not part of the head.
+     * {@code root} turns everything a half about Y, which keeps a box centred on the axis where it is.
      */
-    private static void checkACapitalisedHeadBoneIsFoundWithItsChildrenAndTheRotationsAboveAndInsideIt() {
+    private static void checkACapitalisedHeadBoneIsFoundWithTheRotationsAboveItAndWithoutItsChildren() {
         HeadshotFraming.Box head = HeadBounds.forModel(fixture("capital_head")).orElseThrow();
         assertEquals(18.0 / 16, head.minY(), EPSILON, "the body below the head is left out");
         assertEquals(24.0 / 16, head.maxY(), EPSILON);
-        assertEquals(-3.0 / 16, head.minZ(), EPSILON, "the root's half turn is applied");
-        assertEquals(4.0 / 16, head.maxZ(), EPSILON, "the snout's quarter turn is applied");
-        double near = Math.min(-head.minX(), head.maxX());
-        double far = Math.max(-head.minX(), head.maxX());
-        assertEquals(3.0 / 16, near, EPSILON);
-        assertEquals(4.0 / 16, far, EPSILON);
+        assertEquals(-3.0 / 16, head.minZ(), EPSILON);
+        assertEquals(3.0 / 16, head.maxZ(), EPSILON, "the snout in the child bone is left out");
+        assertEquals(-3.0 / 16, head.minX(), EPSILON);
+        assertEquals(3.0 / 16, head.maxX(), EPSILON);
+    }
+
+    /**
+     * {@code hollow_head.geo.json}: the bone {@code HEAD} has no cubes. Its child {@code skull} is 8 pixels from
+     * (-4, 24, -4), and the skull's child {@code ear} is a 2x4x2 cube from (-1, 32, -1). With no cubes of its own, the head
+     * is boxed around every bone under it: -4 to 4 across and deep, 24 to 36 up. {@code body} is not part of it.
+     */
+    private static void checkAHeadBoneWithoutCubesIsBoxedAroundTheBonesUnderIt() {
+        HeadshotFraming.Box head = HeadBounds.forModel(fixture("hollow_head")).orElseThrow();
+        assertEquals(24.0 / 16, head.minY(), EPSILON, "the body below the head is left out");
+        assertEquals(36.0 / 16, head.maxY(), EPSILON, "the ear two bones down is in");
+        assertEquals(-4.0 / 16, head.minX(), EPSILON);
+        assertEquals(4.0 / 16, head.maxX(), EPSILON);
+        assertEquals(-4.0 / 16, head.minZ(), EPSILON);
+        assertEquals(4.0 / 16, head.maxZ(), EPSILON);
     }
 
     /** {@code fox.geo.json} has a torso and a tail, and no head. */
