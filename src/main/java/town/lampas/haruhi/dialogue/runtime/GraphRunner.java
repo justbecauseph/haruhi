@@ -46,7 +46,11 @@ public final class GraphRunner {
                     session.graphId());
             return new Step.Ended();
         }
-        List<VisibleChoice> fresh = Choices.visible(node.get(), RunContext.of(session, nodeId));
+        Optional<List<VisibleChoice>> freshChoices = visibleChoices(session, nodeId, node.get());
+        if (freshChoices.isEmpty()) {
+            return new Step.Ended();
+        }
+        List<VisibleChoice> fresh = freshChoices.get();
         if (index == DialogueChoicePayload.CONTINUE) {
             if (session.presented().isEmpty() && fresh.isEmpty()) {
                 return advance(session, null, node.get().source().next());
@@ -103,11 +107,30 @@ public final class GraphRunner {
                 nodeId = branch.get();
                 continue;
             }
-            return present(session, nodeId, node, Choices.visible(node, RunContext.of(session, nodeId)));
+            Optional<List<VisibleChoice>> visible = visibleChoices(session, nodeId, node);
+            if (visible.isEmpty()) {
+                return new Step.Ended();
+            }
+            return present(session, nodeId, node, visible.get());
         }
         Haruhi.LOGGER.error("Dialogue {} entered more than {} nodes in one step; ending the conversation",
                 session.graphId(), MAX_HOPS);
         return new Step.Ended();
+    }
+
+    /**
+     * The entries a node shows now. A choice condition or provider that throws ends the conversation, as an action that
+     * throws does, so the caller gets empty and ends it.
+     */
+    private static Optional<List<VisibleChoice>> visibleChoices(
+            DialogueSession session, String nodeId, CompiledGraph.Node node) {
+        try {
+            return Optional.of(Choices.visible(node, RunContext.of(session, nodeId)));
+        } catch (RuntimeException e) {
+            Haruhi.LOGGER.error("A choice condition or provider failed at {}#{}; ending the conversation",
+                    session.graphId(), nodeId, e);
+            return Optional.empty();
+        }
     }
 
     /** After a pick or a continue: follow the transition the actions set, else the node's own next. */
@@ -142,16 +165,19 @@ public final class GraphRunner {
         return true;
     }
 
-    /** One branch by weight: a roll below the total weight picks the branch whose range it falls in. */
+    /**
+     * One branch by weight: a roll below the total weight picks the branch whose range it falls in. The total is a long, so
+     * weights that each fit an int but sum past it still route.
+     */
     static Optional<String> pickBranch(List<WeightedNext> branches, RandomSource random) {
-        int total = 0;
+        long total = 0;
         for (WeightedNext branch : branches) {
-            total = Math.addExact(total, branch.weight());
+            total += branch.weight();
         }
         if (total <= 0) {
             return Optional.empty();
         }
-        int roll = random.nextInt(total);
+        long roll = Math.floorMod(random.nextLong(), total);
         for (WeightedNext branch : branches) {
             if (roll < branch.weight()) {
                 return Optional.of(branch.node());

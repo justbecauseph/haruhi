@@ -376,4 +376,62 @@ class GraphRunnerTest {
         runner.start(session);
         assertInstanceOf(Step.Ended.class, runner.choose(session, DialogueChoicePayload.CONTINUE));
     }
+
+    @Test
+    void aChoiceConditionThatThrowsEndsTheConversationInsteadOfEscaping() {
+        CompiledGraph graph = GraphFixtures.graph("hello", GraphFixtures.node("hello", "Hi", null, List.of(
+                GraphFixtures.choice("Broken", ctx -> {
+                    throw new IllegalStateException("no such flag");
+                }, "bye"))),
+                GraphFixtures.node("bye", "Bye", null, List.of()));
+
+        assertInstanceOf(Step.Ended.class, runner.start(GraphFixtures.session(1, graph, new FakeFlags(), 1, 7)));
+    }
+
+    @Test
+    void aProviderThatThrowsEndsTheConversationInsteadOfEscaping() {
+        CompiledGraph graph = GraphFixtures.graph("board", GraphFixtures.node("board", "Jobs", null, List.of(
+                GraphFixtures.providing(GraphFixtures.ALWAYS, ctx -> {
+                    throw new IllegalStateException("the board is closed");
+                }))));
+
+        assertInstanceOf(Step.Ended.class, runner.start(GraphFixtures.session(1, graph, new FakeFlags(), 1, 7)));
+    }
+
+    @Test
+    void aConditionThatThrowsWhenAPickIsWorkedOutEndsTheConversation() {
+        FakeFlags flags = new FakeFlags();
+        CompiledGraph graph = GraphFixtures.graph("menu", GraphFixtures.node("menu", "Pick", null, List.of(
+                GraphFixtures.choice("A", GraphFixtures.ALWAYS, null),
+                GraphFixtures.choice("B", ctx -> {
+                    if (ctx.flags().isSet(GraphFixtures.MET)) {
+                        throw new IllegalStateException("gate broke");
+                    }
+                    return true;
+                }, null))));
+        DialogueSession session = GraphFixtures.session(1, graph, flags, 1, 7);
+        runner.start(session);
+        flags.set(GraphFixtures.MET, 1);
+
+        assertInstanceOf(Step.Ended.class, runner.choose(session, 0));
+    }
+
+    @Test
+    void routerWeightsThatEachFitAnIntButSumPastItStillRoute() {
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", new WeightedNext("a", 2_000_000_000), new WeightedNext("b", 2_000_000_000)),
+                GraphFixtures.node("a", "A", null, List.of()),
+                GraphFixtures.node("b", "B", null, List.of()));
+        FakeFlags flags = new FakeFlags();
+        RandomSource random = RandomSource.create(5L);
+        int draws = 4_000;
+        int tookA = 0;
+        for (int i = 0; i < draws; i++) {
+            DialogueSession session = GraphFixtures.session(i + 1, graph, flags, 1, random);
+            if (nodeOf(runner.start(session)).equals("a")) {
+                tookA++;
+            }
+        }
+        assertEquals(0.5, (double) tookA / draws, 0.03, "equal weights take each branch about half the time");
+    }
 }

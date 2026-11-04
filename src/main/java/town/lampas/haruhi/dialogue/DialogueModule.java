@@ -70,6 +70,8 @@ public final class DialogueModule {
     private static void registerLifecycle(DialogueSessions service) {
         ServerPlayerEvents.JOIN.register(service::onJoin);
         ServerPlayerEvents.LEAVE.register(service::onLeave);
+        // A respawn replaces the ServerPlayer object, and none of the other events fire for it.
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> service.onRespawn(newPlayer));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayer player) {
                 service.onDeath(player);

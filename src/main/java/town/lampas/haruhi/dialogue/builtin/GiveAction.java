@@ -4,11 +4,13 @@ import com.google.gson.JsonObject;
 import com.mojang.serialization.DataResult;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.loot.LootTable;
+import org.jspecify.annotations.Nullable;
 import town.lampas.haruhi.Haruhi;
 import town.lampas.haruhi.dialogue.api.DialogueAction;
 import town.lampas.haruhi.dialogue.api.DialogueContext;
@@ -51,23 +53,36 @@ final class GiveAction {
                     TYPE, lootTableId);
             return;
         }
+        UUID playerId = player.getUUID();
         flags.setDurable(once, 1).whenComplete((ignored, error) ->
-                server.execute(() -> onWritten(player, lootTableId, table.get(), error)));
+                server.execute(() -> onWritten(server, playerId, lootTableId, table.get(), error)));
     }
 
-    private static void onWritten(ServerPlayer player, Identifier lootTableId, LootTable table, Throwable error) {
+    /**
+     * Gives the loot to the player as they are when the write completes. The entity the action started with may have died
+     * or been replaced since, and a removed entity keeps no inventory.
+     */
+    private static void onWritten(
+            MinecraftServer server, UUID playerId, Identifier lootTableId, LootTable table, @Nullable Throwable error) {
         if (error != null) {
             Haruhi.LOGGER.error("{} could not write the once flag for {}; {} not given",
-                    TYPE, player.getUUID(), lootTableId, error);
+                    TYPE, playerId, lootTableId, error);
             return;
         }
-        if (player.hasDisconnected()) {
+        ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+        if (player == null) {
             Haruhi.LOGGER.error("{} left before {} was given; the once flag is set, so grant it by hand",
-                    player.getUUID(), lootTableId);
+                    playerId, lootTableId);
             return;
         }
+        boolean alive = player.isAlive();
         for (ItemStack stack : table.getRandomItems(Lookups.giftParams(player))) {
-            player.getInventory().placeItemBackInInventory(stack);
+            if (alive) {
+                player.getInventory().placeItemBackInInventory(stack);
+            } else {
+                // Dead and not yet respawned: the inventory is already gone, so the items land where the player died.
+                player.drop(stack, true);
+            }
         }
     }
 }

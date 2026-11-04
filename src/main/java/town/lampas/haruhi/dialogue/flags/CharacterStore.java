@@ -3,6 +3,7 @@ package town.lampas.haruhi.dialogue.flags;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -14,8 +15,10 @@ import town.lampas.haruhi.storage.VisitRecord;
 
 /**
  * The dialogue module's view of storage for flags and visits. Every call for one player is ordered: a load runs after
- * the writes submitted before it, so a player who quits and rejoins reads what was flushed. The storage is read through
- * the supplier when an operation runs, because storage initialises before dialogue but may not be set at construction.
+ * the writes submitted before it, so a player who quits and rejoins reads what was flushed. A load also includes the
+ * changes that are still waiting to be stored, so a failed write does not make the reload stale. The storage is read
+ * through the supplier when an operation runs, because storage initialises before dialogue but may not be set at
+ * construction.
  */
 public final class CharacterStore {
 
@@ -32,8 +35,11 @@ public final class CharacterStore {
     }
 
     public CompletableFuture<Loaded> load(UUID character) {
+        // The overlay runs inside the ordered operation, straight after the read, so the next operation for this player
+        // starts only once the overlay has been applied.
         CompletableFuture<Map<FlagKey, Integer>> flags = ordered.submit(character,
-                () -> storage.get().loadFlags(character));
+                () -> storage.get().loadFlags(character)
+                        .thenApply(stored -> writeBehind.overlay(character, stored)));
         CompletableFuture<Map<VisitKey, VisitRecord>> visits = ordered.submit(character,
                 () -> storage.get().loadVisits(character));
         return flags.thenCombine(visits, Loaded::new);
@@ -48,9 +54,12 @@ public final class CharacterStore {
         writeBehind.record(character, change);
     }
 
-    /** Writes one change now, after the character's earlier writes. */
-    public CompletableFuture<Void> writeThrough(UUID character, FlagChange change) {
-        return ordered.submit(character, () -> writeFlags(character, List.of(change)));
+    /**
+     * Writes one change now, after the character's earlier writes. Completes when storage has it, or fails when the write
+     * fails; {@code previous} is the value the cache goes back to in that case.
+     */
+    public CompletableFuture<Void> writeDurably(UUID character, FlagChange change, OptionalInt previous) {
+        return writeBehind.writeDurably(character, change, previous);
     }
 
     public CompletableFuture<Void> flush(UUID character) {

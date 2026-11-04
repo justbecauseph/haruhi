@@ -12,7 +12,8 @@ public interface DurableFlags extends DialogueFlags {
 
     /**
      * Sets the flag in the cache and writes it to storage now. The returned future completes when storage has the
-     * value; if the write fails, the cache goes back to what it was and the future fails.
+     * value. If the write fails, the cache goes back to what it was, storage is set back to that value, and the future
+     * fails, so the caller must not act on the flag as set.
      */
     CompletableFuture<Void> setDurable(FlagKey key, int value);
 }

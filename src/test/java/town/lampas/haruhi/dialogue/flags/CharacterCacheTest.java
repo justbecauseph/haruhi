@@ -20,14 +20,14 @@ class CharacterCacheTest {
     private static final Instant NOW = Instant.parse("2026-11-04T00:00:00Z");
 
     @Test
-    void anUnsetFlagReadsAsZeroAndIsNotSet() {
+    void anUnsetFlagReadsAsZero() {
         CharacterCache cache = new CharacterCache();
         cache.load(Map.of(), Map.of());
         assertEquals(0, cache.flag(MET));
     }
 
     @Test
-    void zeroIsNotSetAndAnythingElseIs() {
+    void aStoredZeroReadsAsZeroAndAnotherValueIsKept() {
         CharacterCache cache = new CharacterCache();
         cache.load(Map.of(MET, 0), Map.of());
         assertEquals(0, cache.flag(MET));
