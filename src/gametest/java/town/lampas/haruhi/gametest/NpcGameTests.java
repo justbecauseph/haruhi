@@ -28,19 +28,30 @@ import net.minecraft.world.phys.Vec3;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.dialogue.DialogueModule;
+import town.lampas.haruhi.dialogue.DialogueSessions;
+import town.lampas.haruhi.dialogue.runtime.DialogueSession;
 import town.lampas.haruhi.npc.NpcEntities;
 import town.lampas.haruhi.npc.NpcEntity;
 import town.lampas.haruhi.npc.NpcLook;
 
-/** Server GameTests owned by the npc component. They need every module, so they run after integration. */
+/**
+ * Server GameTests owned by the npc component. They need every module, so they run after integration.
+ *
+ * <p>The active content is one per server, and the content and dialogue GameTests activate their own bundles. These
+ * tests therefore run in their own test environment, {@value #ENVIRONMENT} (an empty one, in
+ * {@code data/haruhi-gametest/test_environment/npc.json}). The GameTest runner puts each environment in its own batch
+ * and runs batches one after another, so no other component's test changes the active content while these run, and
+ * the fixture stays active across the ticks a dialogue open waits for a player's flags.
+ */
 public final class NpcGameTests {
+    private static final String ENVIRONMENT = "haruhi-gametest:npc";
     private static final String FIXTURE = "/haruhi/fixtures/npc/npc_bundle.json";
     /** The fixture with the styled profile changed: the Alex skin, and no model or animations. */
     private static final String RESTYLED_FIXTURE = "/haruhi/fixtures/npc/npc_bundle_restyled.json";
     private static final Identifier GREETER = Identifier.fromNamespaceAndPath("haruhi", "fixture/greeter");
     private static final Identifier STYLED = Identifier.fromNamespaceAndPath("haruhi", "fixture/styled");
 
-    @GameTest(maxTicks = 120)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 120)
     public void npcDoesNotMoveOverOneHundredTicks(GameTestHelper helper) {
         activateFixtures();
         NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
@@ -51,7 +62,7 @@ public final class NpcGameTests {
         });
     }
 
-    @GameTest(maxTicks = 1)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 1)
     public void npcIgnoresPlayerDamageButNotKill(GameTestHelper helper) {
         activateFixtures();
         ServerPlayer player = mockPlayer(helper);
@@ -68,7 +79,7 @@ public final class NpcGameTests {
         helper.succeed();
     }
 
-    @GameTest(maxTicks = 1)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 1)
     public void profileSurvivesSaveAndLoad(GameTestHelper helper) {
         activateFixtures();
         NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
@@ -86,34 +97,54 @@ public final class NpcGameTests {
     }
 
     /**
-     * A player who has joined, and whose dialogue flags have loaded, right-clicks the NPC from within reach. The dialogue
-     * opens a conversation only once the player's flags have loaded from storage, off the server thread, and only for a
-     * player near the interlocutor. So the player joins first, and the activation, spawn and right-click then run in one
-     * tick; the previous content is active again at the end, so the other tests in the batch never see the swap.
+     * A player whose dialogue flags have loaded right-clicks the NPC from within reach, and the profile's dialogue starts
+     * in the same tick with the NPC as the interlocutor. Joining starts the flag load off the server thread, so the test
+     * waits for it before the right-click.
      */
-    // makeMockServerPlayerInLevel is the only 26.2 helper whose player joins (fires JOIN) and has a connection.
-    @SuppressWarnings("removal")
-    @GameTest(maxTicks = 100)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
     public void rightClickOpensTheDialogue(GameTestHelper helper) {
-        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        activateFixtures();
+        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+        ServerPlayer player = joinNextTo(helper, npc);
+        DialogueSessions sessions = DialogueModule.sessions();
+
         helper.startSequence()
-                .thenWaitUntil(() -> helper.assertTrue(DialogueModule.sessions().loadedFlags(player).isPresent(),
+                .thenWaitUntil(() -> helper.assertTrue(sessions.loadedFlags(player).isPresent(),
                         "the joined player's dialogue flags have not loaded"))
                 .thenExecute(() -> {
-                    ContentBundle previous = HaruhiServices.content().active();
-                    try {
-                        activateFixtures();
-                        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
-                        player.setPos(npc.getX() + 1.0, npc.getY(), npc.getZ());
-
-                        npc.interact(player, InteractionHand.MAIN_HAND, npc.position());
-                        helper.assertTrue(HaruhiServices.dialogue().isInDialogue(player),
-                                "right-click did not open the dialogue");
-                    } finally {
-                        HaruhiServices.dialogue().close(player);
-                        HaruhiServices.content().activateUnstored(previous);
-                    }
+                    npc.interact(player, InteractionHand.MAIN_HAND, npc.position());
+                    helper.assertTrue(HaruhiServices.dialogue().isInDialogue(player),
+                            "right-click did not open the dialogue");
+                    assertTalkingTo(helper, player, npc);
+                    HaruhiServices.dialogue().close(player);
                 })
+                .thenSucceed();
+    }
+
+    /**
+     * A player whose dialogue flags are not cached right-clicks the NPC from within reach. The open is queued while the
+     * flags load off the server thread; once they have loaded, the dialogue checks that the player is still within 8
+     * blocks of the NPC and starts the profile's dialogue with the NPC as the interlocutor.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
+    public void rightClickBeforeTheFlagsLoadOpensTheDialogueOnceTheyLoad(GameTestHelper helper) {
+        activateFixtures();
+        NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+        ServerPlayer player = joinNextTo(helper, npc);
+        DialogueSessions sessions = DialogueModule.sessions();
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(sessions.loadedFlags(player).isPresent(),
+                        "the joined player's dialogue flags have not loaded"))
+                .thenExecute(() -> {
+                    // Drop the player's cached flags, as quitting does, so the right-click below finds them unloaded
+                    // and queues its open behind a fresh load.
+                    sessions.onLeave(player);
+                    helper.assertTrue(sessions.loadedFlags(player).isEmpty(), "the player's flags are still cached");
+                    npc.interact(player, InteractionHand.MAIN_HAND, npc.position());
+                })
+                .thenWaitUntil(() -> assertTalkingTo(helper, player, npc))
+                .thenExecute(() -> HaruhiServices.dialogue().close(player))
                 .thenSucceed();
     }
 
@@ -122,7 +153,7 @@ public final class NpcGameTests {
      * changes the profile sends the new look. Everything runs in one tick and the previous content is active again at
      * the end, so the other tests in the batch never see the swap.
      */
-    @GameTest(maxTicks = 1)
+    @GameTest(environment = ENVIRONMENT, maxTicks = 1)
     public void lookSyncsToTrackingClientsAndFollowsContentActivation(GameTestHelper helper) {
         ContentBundle previous = HaruhiServices.content().active();
         try {
@@ -183,6 +214,24 @@ public final class NpcGameTests {
     /** A survival player in the test level. The helper's own factory is deprecated for removal. */
     private static ServerPlayer mockPlayer(GameTestHelper helper) {
         return (ServerPlayer) helper.makeMockServerPlayer(GameType.SURVIVAL);
+    }
+
+    /** A player who joins the server, which starts loading their dialogue flags, and stands 1 block from {@code npc}. */
+    // makeMockServerPlayerInLevel is the only 26.2 helper whose player joins (fires JOIN) and has a connection.
+    @SuppressWarnings("removal")
+    private static ServerPlayer joinNextTo(GameTestHelper helper, NpcEntity npc) {
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        player.setPos(npc.getX() + 1.0, npc.getY(), npc.getZ());
+        return player;
+    }
+
+    /** Fails the current check unless {@code player} is in the greeter's dialogue, at its start node, with {@code npc}. */
+    private static void assertTalkingTo(GameTestHelper helper, ServerPlayer player, NpcEntity npc) {
+        Optional<DialogueSession> session = DialogueModule.sessions().session(player);
+        helper.assertTrue(session.isPresent(), "no conversation has started");
+        helper.assertValueEqual(session.get().graphId(), GREETER, "the graph of the conversation");
+        helper.assertTrue(session.get().interlocutor() == npc, "the right-clicked NPC is not the interlocutor");
+        helper.assertValueEqual(session.get().presentedNode(), "hello", "the node the conversation shows");
     }
 
     private static NpcEntity spawn(GameTestHelper helper, Identifier profile, Vec3 relative) {
