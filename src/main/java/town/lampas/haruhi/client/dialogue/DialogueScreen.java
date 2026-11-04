@@ -8,7 +8,6 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -18,6 +17,7 @@ import net.minecraft.util.Util;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import org.lwjgl.glfw.GLFW;
+import town.lampas.haruhi.client.npc.HeadshotRenderer;
 import town.lampas.haruhi.client.npc.NpcLookAssets;
 import town.lampas.haruhi.network.ChoiceView;
 import town.lampas.haruhi.network.DialogueChoicePayload;
@@ -25,24 +25,22 @@ import town.lampas.haruhi.network.DialogueDismissPayload;
 import town.lampas.haruhi.network.DialogueNodePayload;
 
 /**
- * The visual-novel dialogue screen. A text box runs along the bottom with the speaker's name on a plate inside it. The
- * text types out at the configured speed; a click, Space or Enter finishes it, and once it is finished a further press
- * continues when the node has no choices. Choices stack above the box on the right, and the number keys or a click pick
- * them once the text is finished. When more choices are offered than fit, the list scrolls with the mouse wheel or the
- * Up and Down keys, and the box leaves room above it for at least three of them. A portrait sits above the box on the
- * left: the node's 2D portrait when it names one that exists, else a 3D render of the speaker when it is loaded.
+ * The visual-novel dialogue screen. A text box runs along the bottom. Inside it, on the left, a square headshot shows
+ * the speaker: the node's 2D portrait when it names one that exists (stretched to the square, so portrait textures
+ * should be square), else a 3D render of the speaker's head and shoulders when the speaker is loaded, else nothing, and
+ * the text then starts at the box's left padding. To the right of the headshot are the speaker's name, a divider and
+ * the text ({@link DialogueLayout}). The text types out at the configured speed; a click, Space or Enter finishes it,
+ * and once it is finished a further press continues when the node has no choices. Choices stack above the box on the
+ * right, and the number keys or a click pick them once the text is finished. When more choices are offered than fit,
+ * the list scrolls with the mouse wheel or the Up and Down keys, and the box leaves room above it for at least three of
+ * them. The screen draws no background, so the world stays in view behind it.
  *
  * <p>Input only sends the session id, node id and choice index; the server checks each one. Escape sends a dismiss and
  * closes the screen.
  */
 public final class DialogueScreen extends Screen {
-    private static final int MARGIN = 12;
-    private static final int PADDING = 14;
-    private static final int TOP_PADDING = 10;
-    private static final int BOTTOM_PADDING = 18;
-    private static final int MIN_BOX_HEIGHT = 84;
-    private static final int NAME_HEIGHT = 14;
-    private static final int NAME_GAP = 6;
+    private static final int MARGIN = DialogueLayout.MARGIN;
+    private static final int PADDING = DialogueLayout.PADDING;
     private static final int ROW_HEIGHT = 16;
     private static final int ROW_GAP = 2;
     private static final int CHOICE_NUMBER_WIDTH = 16;
@@ -53,7 +51,6 @@ public final class DialogueScreen extends Screen {
 
     private static final int BOX_FILL = 0xD0101018;
     private static final int BOX_EDGE = 0xFF8A7F6A;
-    private static final int NAME_FILL = 0xE0284050;
     private static final int NAME_TEXT = 0xFFFFD27F;
     private static final int TEXT = 0xFFF2EDE2;
     private static final int HINT = 0xFFB8B09E;
@@ -77,14 +74,12 @@ public final class DialogueScreen extends Screen {
 
     private List<FormattedCharSequence> lines = List.of();
     private int totalChars;
-    private int boxX;
-    private int boxY;
-    private int boxWidth;
-    private int boxHeight;
-    private int textX;
-    private int textY;
-    private int textWidth;
+    private DialogueLayout box;
     private int lineHeight;
+    /** The node's portrait when its texture exists, from the last layout. */
+    private Optional<Identifier> portrait = Optional.empty();
+    /** Whether the last layout made room for a headshot, which it does when there is a portrait or a loaded speaker. */
+    private boolean headshotLaidOut;
     private final List<ChoiceRow> choiceRows = new ArrayList<>();
     /** The position of the choice scrolled to the top of the choice list, as the last frame clamped it. */
     private int choiceScroll;
@@ -125,103 +120,113 @@ public final class DialogueScreen extends Screen {
         layout();
     }
 
-    /** Works out the box, the wrapped lines and the text's character count for the current window size. */
+    /**
+     * Works out the box, the headshot frame, the wrapped lines and the text's character count for the current window
+     * size, the node, and whether there is a headshot to show.
+     */
     private void layout() {
         if (node == null || width <= 0 || height <= 0) {
             return;
         }
-        boxWidth = width - 2 * MARGIN;
-        boxX = MARGIN;
-        textX = boxX + PADDING;
-        textWidth = boxWidth - 2 * PADDING;
+        portrait = node.portrait().filter(NpcLookAssets::resourceExists);
+        headshotLaidOut = portrait.isPresent() || speakerEntity() != null;
         lineHeight = font.lineHeight + 2;
-        lines = font.split(node.text(), textWidth);
-        totalChars = countCharacters(lines);
-
-        int namePart = hasName() ? NAME_HEIGHT + NAME_GAP : 0;
-        int wanted = TOP_PADDING + namePart + lines.size() * lineHeight + BOTTOM_PADDING;
         // Leave room above the box for a few choice rows, so a long text cannot push them into the box or off screen.
         int choiceRoom = ChoiceLayout.reservedHeight(node.choices().size(), minChoicePitch(), CHOICE_GAP);
-        boxHeight = Math.min(Math.max(MIN_BOX_HEIGHT, wanted), height - 2 * MARGIN - choiceRoom);
-        boxY = height - MARGIN - boxHeight;
-        textY = boxY + TOP_PADDING + namePart;
+        Component text = node.text();
+        box = DialogueLayout.compute(width, height, headshotLaidOut, hasName(), font.lineHeight, lineHeight,
+                choiceRoom, textWidth -> font.split(text, textWidth).size());
+        lines = font.split(text, box.textWidth());
+        totalChars = countCharacters(lines);
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        if (node == null) {
+        if (node == null || box == null) {
             return;
+        }
+        LivingEntity speaker = speakerEntity();
+        // The speaker can load or unload while the screen is open, which adds or removes the 3D headshot.
+        if (portrait.isEmpty() && (speaker != null) != headshotLaidOut) {
+            layout();
         }
         int visible = typewriter.visibleChars(Util.getMillis(), totalChars);
         boolean textDone = visible >= totalChars;
 
         drawBox(graphics);
-        drawNameplate(graphics);
+        drawHeadshot(graphics, speaker);
+        drawName(graphics);
         drawText(graphics, visible);
-        drawPortrait(graphics);
         drawChoices(graphics, mouseX, mouseY);
         drawContinueHint(graphics, textDone);
     }
 
-    private void drawBox(GuiGraphicsExtractor graphics) {
-        int right = boxX + boxWidth;
-        int bottom = boxY + boxHeight;
-        graphics.fill(boxX, boxY, right, bottom, BOX_FILL);
-        graphics.fill(boxX, boxY, right, boxY + 1, BOX_EDGE);
-        graphics.fill(boxX, bottom - 1, right, bottom, BOX_EDGE);
-        graphics.fill(boxX, boxY, boxX + 1, bottom, BOX_EDGE);
-        graphics.fill(right - 1, boxY, right, bottom, BOX_EDGE);
+    /**
+     * No blur and no menu background, as the chat screen draws none, so the world shows behind the dialogue. What
+     * {@link Screen#extractBackground} does after its background still runs: the HUD's deferred subtitles.
+     */
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        minecraft.gui.hud.extractDeferredSubtitles();
     }
 
-    private void drawNameplate(GuiGraphicsExtractor graphics) {
+    private void drawBox(GuiGraphicsExtractor graphics) {
+        int right = box.boxX() + box.boxWidth();
+        int bottom = box.boxY() + box.boxHeight();
+        graphics.fill(box.boxX(), box.boxY(), right, bottom, BOX_FILL);
+        drawEdge(graphics, box.boxX(), box.boxY(), right, bottom);
+    }
+
+    /** A one-pixel {@link #BOX_EDGE} line just inside the rectangle from {@code (x0, y0)} to {@code (x1, y1)}. */
+    private static void drawEdge(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1) {
+        graphics.fill(x0, y0, x1, y0 + 1, BOX_EDGE);
+        graphics.fill(x0, y1 - 1, x1, y1, BOX_EDGE);
+        graphics.fill(x0, y0, x0 + 1, y1, BOX_EDGE);
+        graphics.fill(x1 - 1, y0, x1, y1, BOX_EDGE);
+    }
+
+    /** The headshot square with an edge around it: the portrait, else the speaker's head, else an empty frame. */
+    private void drawHeadshot(GuiGraphicsExtractor graphics, LivingEntity speaker) {
+        if (!box.hasFrame()) {
+            return;
+        }
+        int x0 = box.frameX();
+        int y0 = box.frameY();
+        int x1 = x0 + box.frameSize();
+        int y1 = y0 + box.frameSize();
+        drawEdge(graphics, x0 - 1, y0 - 1, x1 + 1, y1 + 1);
+        graphics.fill(x0, y0, x1, y1, PORTRAIT_FILL);
+        if (portrait.isPresent()) {
+            graphics.blit(portrait.get(), x0, y0, x1, y1, 0.0F, 1.0F, 0.0F, 1.0F);
+        } else if (speaker != null) {
+            HeadshotRenderer.draw(graphics, speaker, x0, y0, x1, y1);
+        }
+    }
+
+    /** The speaker's name at the top of the text column, cut to the column's width, with the divider under it. */
+    private void drawName(GuiGraphicsExtractor graphics) {
         if (!hasName()) {
             return;
         }
-        int x = textX;
-        int y = boxY + TOP_PADDING - 4;
-        int plateWidth = font.width(node.speakerName()) + 12;
-        graphics.fill(x, y, x + plateWidth, y + NAME_HEIGHT, NAME_FILL);
-        graphics.text(font, node.speakerName(), x + 6, y + 3, NAME_TEXT);
+        List<FormattedCharSequence> name = font.split(node.speakerName(), box.textWidth());
+        if (!name.isEmpty()) {
+            graphics.text(font, name.getFirst(), box.textX(), box.nameY(), NAME_TEXT);
+        }
+        graphics.fill(box.textX(), box.dividerY(), box.textRight(), box.dividerY() + DialogueLayout.DIVIDER_HEIGHT,
+                BOX_EDGE);
     }
 
     /** Draws the first {@code visible} characters of the wrapped lines, top to bottom. */
     private void drawText(GuiGraphicsExtractor graphics, int visible) {
         int remaining = visible;
-        int y = textY;
+        int y = box.textY();
         for (FormattedCharSequence line : lines) {
             int take = Math.min(codepoints(line), remaining);
             if (take > 0) {
-                graphics.text(font, prefix(line, take), textX, y, TEXT);
+                graphics.text(font, prefix(line, take), box.textX(), y, TEXT);
             }
             remaining -= take;
             y += lineHeight;
-        }
-    }
-
-    private void drawPortrait(GuiGraphicsExtractor graphics) {
-        int portraitWidth = Math.min(160, Math.max(72, width / 5));
-        int portraitHeight = Math.min(portraitWidth * 3 / 2, boxY - 2 * MARGIN - 8);
-        if (portraitHeight < 40) {
-            return;
-        }
-        int x = boxX + 4;
-        int y = boxY - portraitHeight - 8;
-        int right = x + portraitWidth;
-        int bottom = y + portraitHeight;
-
-        Optional<Identifier> portrait = node.portrait();
-        if (portrait.isPresent() && NpcLookAssets.resourceExists(portrait.get())) {
-            graphics.fill(x, y, right, bottom, PORTRAIT_FILL);
-            graphics.blit(portrait.get(), x, y, right, bottom, 0.0F, 1.0F, 0.0F, 1.0F);
-            return;
-        }
-        LivingEntity speaker = speakerEntity();
-        if (speaker != null) {
-            graphics.fill(x, y, right, bottom, PORTRAIT_FILL);
-            // The inventory helper takes pixels per block. A 1.8-block NPC then fills about three quarters of the frame.
-            InventoryScreen.extractEntityInInventoryFollowsMouse(graphics, x, y, right, bottom,
-                    Math.max(1, portraitHeight * 5 / 12), 0.0625F, x + portraitWidth / 2.0F, y + portraitHeight / 2.0F,
-                    speaker);
         }
     }
 
@@ -235,11 +240,13 @@ public final class DialogueScreen extends Screen {
         for (ChoiceView choice : choices) {
             widest = Math.max(widest, font.width(choice.text()));
         }
+        int boxX = box.boxX();
+        int boxWidth = box.boxWidth();
         int rowWidth = Math.min(boxWidth * 3 / 5, widest + CHOICE_NUMBER_WIDTH + 12);
         int right = boxX + boxWidth - PADDING;
         int left = right - rowWidth;
         int labelWidth = rowWidth - 2 * CHOICE_INSET;
-        ChoiceLayout.Placement placement = ChoiceLayout.place(choices.size(), MARGIN, boxY - CHOICE_GAP,
+        ChoiceLayout.Placement placement = ChoiceLayout.place(choices.size(), MARGIN, box.boxY() - CHOICE_GAP,
                 ROW_HEIGHT + ROW_GAP, ROW_HEIGHT, minChoicePitch(), choiceScroll);
         choiceScroll = placement.first();
         List<ChoiceLayout.Row> rows = placement.rows();
@@ -294,8 +301,7 @@ public final class DialogueScreen extends Screen {
             return;
         }
         Component hint = Component.translatable("screen.haruhi.dialogue.continue");
-        int x = boxX + boxWidth - PADDING - font.width(hint);
-        graphics.text(font, hint, x, boxY + boxHeight - 13, HINT);
+        graphics.text(font, hint, box.textRight() - font.width(hint), box.hintY(), HINT);
     }
 
     @Override
