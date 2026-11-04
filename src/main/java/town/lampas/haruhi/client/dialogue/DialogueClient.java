@@ -12,7 +12,8 @@ import town.lampas.haruhi.network.DialogueNodePayload;
 /**
  * Owned by the client component. Receives {@link DialogueNodePayload} and opens or updates the {@link DialogueScreen};
  * receives {@link DialogueClosePayload} and closes the screen when its session matches. A node that names an animation
- * and a speaker plays that animation on the speaker. Text speed comes from {@code config/haruhi-client.json}.
+ * and a speaker plays that animation on the speaker. Text speed comes from {@code config/haruhi-client.json}. While the
+ * screen is open, {@link DialogueHud} hides the HUD under the box and moves the chat above it.
  */
 public final class DialogueClient {
     private static volatile double textSpeed = DialogueClientConfig.DEFAULT_TEXT_SPEED;
@@ -26,6 +27,7 @@ public final class DialogueClient {
                 (payload, context) -> context.client().execute(() -> showNode(payload)));
         ClientPlayNetworking.registerGlobalReceiver(DialogueClosePayload.TYPE,
                 (payload, context) -> context.client().execute(() -> close(payload.sessionId())));
+        DialogueHud.register();
     }
 
     /** The entity the open dialogue screen names as its speaker, or empty. Client thread only. */

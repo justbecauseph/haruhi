@@ -76,7 +76,8 @@ final class NpcCommands {
             throw fail("The NPC entity type could not be created");
         }
         npc.setPos(pos.x, pos.y, pos.z);
-        npc.turnTo(source.getRotation().y);
+        // Toward the source, so an NPC spawned in front of a player (^ ^ ^3) faces that player, not away from them.
+        npc.turnTo(NpcFacing.spawnYaw(pos, source.getPosition(), source.getRotation().y));
         npc.setProfile(profileId);
         level.addFreshEntity(npc);
         source.sendSuccess(() -> Component.literal("Spawned NPC " + describe(npc)), true);
