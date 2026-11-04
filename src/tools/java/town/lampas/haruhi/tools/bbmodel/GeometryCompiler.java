@@ -259,15 +259,26 @@ final class GeometryCompiler {
         }
     }
 
-    /** Texture.getDefault, as far as a file can tell: the texture marked use_as_default, else the first. */
+    /**
+     * Texture.getDefault, as far as a file can tell. Blockbench reads use_as_default only in a format that sets
+     * single_texture_default, which among the built-in formats is bedrock_block alone: "if
+     * (Format.single_texture_default) { let default_enabled = Texture.all.find(tex => tex.use_as_default); if
+     * (default_enabled) return default_enabled; }". Otherwise it returns the selected texture, which a file does not
+     * record, and after a fresh load that is the first texture, so the first is taken here.
+     */
     private int defaultTexture() {
-        for (int i = 0; i < project.textures.size(); i++) {
-            if (BbProject.bool(project.textures.get(i), "use_as_default", false)) {
-                return i;
+        if (SINGLE_TEXTURE_DEFAULT_FORMAT.equals(project.modelFormat)) {
+            for (int i = 0; i < project.textures.size(); i++) {
+                if (BbProject.bool(project.textures.get(i), "use_as_default", false)) {
+                    return i;
+                }
             }
         }
         return project.textures.isEmpty() ? NOT_DRAWN : 0;
     }
+
+    /** The one built-in Blockbench format that sets single_texture_default. */
+    private static final String SINGLE_TEXTURE_DEFAULT_FORMAT = "bedrock_block";
 
     /**
      * The texture a face draws with, or NOT_DRAWN. A bbmodel face stores its texture as an index into the textures array

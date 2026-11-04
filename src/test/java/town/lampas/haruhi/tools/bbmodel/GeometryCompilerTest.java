@@ -455,8 +455,9 @@ class GeometryCompilerTest {
      * In a single-texture format bbmodel.js load gives every face that is not null the default texture: "} else if
      * (default_texture && copy.faces && copy.faces[face].texture !== null && !Format.single_texture_default) {
      * copy.faces[face].texture = default_texture.uuid }". So a face that stores index 0 and a face that stores no texture
-     * are both drawn with the default, which the converter takes to be the texture marked use_as_default ("blue"). "red"
-     * is ignored, and no face warns that it has no texture.
+     * are both drawn with the default. modded_entity does not set single_texture_default, so Texture.getDefault ignores
+     * use_as_default there and the default is the first texture ("red"), even though "blue" is marked. "blue" is
+     * ignored, and no face warns that it has no texture.
      */
     @Test
     void singleTextureFormatDrawsEveryFaceWithTheDefaultTexture() throws IOException {
@@ -473,11 +474,33 @@ class GeometryCompilerTest {
 
         assertEquals(6, uv.size(), "all six faces are drawn");
         assertEquals(1, conversion.report().texturesUsed().size());
-        assertTrue(conversion.report().texturesUsed().getFirst().startsWith("blue ("));
+        assertTrue(conversion.report().texturesUsed().getFirst().startsWith("red ("));
         assertEquals(1, conversion.report().texturesIgnored().size());
-        assertTrue(conversion.report().texturesIgnored().getFirst().startsWith("red ("));
+        assertTrue(conversion.report().texturesIgnored().getFirst().startsWith("blue ("));
         assertFalse(conversion.report().hasWarning("without a texture"));
         assertFalse(conversion.report().hasWarning("has no texture"));
+    }
+
+    /**
+     * bedrock_block sets single_texture_default, so Texture.getDefault returns the texture marked use_as_default
+     * ("blue"), and faces that store no texture draw with it. "red", which no face names, is ignored.
+     */
+    @Test
+    void bedrockBlockTakesTheTextureMarkedUseAsDefault() throws IOException {
+        JsonObject project = project("4.10", "bedrock_block", false, 16, 16);
+        texture(project, "red", filled(16, 16, RED), 16, 16);
+        texture(project, "blue", filled(16, 16, BLUE), 16, 16).addProperty("use_as_default", true);
+        JsonObject block = cube(project, "c1", "block", new double[] {0, 0, 0}, new double[] {1, 1, 1});
+        for (String face : List.of("north", "east", "south", "west", "up", "down")) {
+            block.getAsJsonObject("faces").getAsJsonObject(face).remove("texture");
+        }
+        project.getAsJsonArray("outliner").add(group("g1", "body", new double[3], null, uuid("c1")));
+
+        BbmodelConverter.Conversion conversion = convert(project);
+
+        assertEquals(1, conversion.report().texturesUsed().size());
+        assertTrue(conversion.report().texturesUsed().getFirst().startsWith("blue ("));
+        assertTrue(conversion.report().texturesIgnored().getFirst().startsWith("red ("));
     }
 
     /**
