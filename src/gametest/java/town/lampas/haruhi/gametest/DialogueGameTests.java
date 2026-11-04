@@ -86,8 +86,15 @@ public final class DialogueGameTests {
                     sessions.choose(player, session.id(), "greet", indexOf(helper, session, TELL_ME_MORE));
                 })
                 .thenWaitUntil(() -> {
+                    // info has no choices and next "bye", so its continue moves to bye (DialogueNode).
                     DialogueSession session = presentedAt(helper, sessions, player, "info");
                     sessions.choose(player, session.id(), "info", DialogueChoicePayload.CONTINUE);
+                })
+                .thenWaitUntil(() -> {
+                    // bye has no choices and no next, so its continue ends the conversation.
+                    DialogueSession session = presentedAt(helper, sessions, player, "bye");
+                    helper.assertTrue(session.id() == firstSession[0], "info's continue stays in the first conversation");
+                    sessions.choose(player, session.id(), "bye", DialogueChoicePayload.CONTINUE);
                 })
                 .thenExecute(() -> {
                     helper.assertFalse(sessions.isInDialogue(player), "the first conversation ended");
@@ -153,6 +160,26 @@ public final class DialogueGameTests {
                     helper.assertValueEqual(0, flagsOf(helper, sessions, player).get(MET),
                             "no entry ran, so met is still unset");
                 })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void anOpenWaitingForTheFlagsIsInDialogueAndCloseCancelsIt(GameTestHelper helper) {
+        activateFixture(helper);
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        DialogueSessions sessions = DialogueModule.sessions();
+        // The mock joined this tick, so its flags are normally still loading and the open is queued until they arrive.
+        // When the load has already finished, the open starts a session instead; both must count as in dialogue.
+        helper.assertTrue(sessions.open(player, CLERK, null), "the fixture graph should open");
+        helper.assertTrue(sessions.isInDialogue(player), "an opened conversation counts before its flags load");
+        sessions.close(player);
+        helper.assertFalse(sessions.isInDialogue(player), "close ends the conversation, queued or not");
+
+        helper.startSequence()
+                .thenWaitUntil(() -> flagsOf(helper, sessions, player))
+                .thenIdle(2)
+                .thenExecute(() -> helper.assertTrue(sessions.session(player).isEmpty(),
+                        "the closed conversation did not start once the flags loaded"))
                 .thenSucceed();
     }
 
