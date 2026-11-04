@@ -34,6 +34,7 @@ abstract class HaruhiStorageContractTest {
     private static final Instant T0 = Instant.parse("2026-11-04T10:00:00Z");
     private static final Instant T1 = Instant.parse("2026-11-04T10:01:00Z");
     private static final Instant T2 = Instant.parse("2026-11-04T10:02:00Z");
+    private static final Instant T3 = Instant.parse("2026-11-04T10:03:00Z");
     private static final FlagKey MET = new FlagKey("haruhi:example/greeter", "met");
     private static final FlagKey TIMES_TALKED = new FlagKey("haruhi:example/greeter", "times_talked");
     private static final VisitKey GREETER = new VisitKey(
@@ -225,6 +226,32 @@ abstract class HaruhiStorageContractTest {
         List<RevisionSummary> listing = await(storage.listRevisions(10));
         assertEquals(1, listing.stream().filter(RevisionSummary::active).count());
         assertEquals(second.id(), listing.stream().filter(RevisionSummary::active).findFirst().orElseThrow().id());
+    }
+
+    @Test
+    void replacedRevisionsKeepTheirActivationTimes() {
+        StoredRevision first = store("digest-a", T0);
+        StoredRevision second = store("digest-b", T1);
+        StoredRevision third = store("digest-c", T2);
+
+        await(storage.activateRevision(first.id(), "operator", T1));
+        await(storage.activateRevision(second.id(), "operator", T2));
+        await(storage.activateRevision(third.id(), "operator", T3));
+
+        assertEquals(
+                Optional.of(new StoredRevision(first.id(), "digest-a", BUNDLE, "alice", T0, Optional.of(T1), false)),
+                await(storage.loadRevision(first.id())));
+        assertEquals(
+                Optional.of(new StoredRevision(second.id(), "digest-b", BUNDLE, "alice", T1, Optional.of(T2), false)),
+                await(storage.loadRevision(second.id())));
+        assertEquals(
+                Optional.of(new StoredRevision(third.id(), "digest-c", BUNDLE, "alice", T2, Optional.of(T3), true)),
+                await(storage.loadRevision(third.id())));
+        assertEquals(List.of(
+                new RevisionSummary(third.id(), "digest-c", "alice", T2, Optional.of(T3), true),
+                new RevisionSummary(second.id(), "digest-b", "alice", T1, Optional.of(T2), false),
+                new RevisionSummary(first.id(), "digest-a", "alice", T0, Optional.of(T1), false)),
+                await(storage.listRevisions(10)));
     }
 
     @Test
