@@ -28,8 +28,9 @@ import town.lampas.haruhi.network.DialogueNodePayload;
  * The visual-novel dialogue screen. A text box runs along the bottom with the speaker's name on a plate inside it. The
  * text types out at the configured speed; a click, Space or Enter finishes it, and once it is finished a further press
  * continues when the node has no choices. Choices stack above the box on the right, and the number keys or a click pick
- * them once the text is finished. A portrait sits above the box on the left: the node's 2D portrait when it names one that
- * exists, else a 3D render of the speaker when it is loaded.
+ * them once the text is finished. When more choices are offered than fit, the list scrolls with the mouse wheel or the
+ * Up and Down keys, and the box leaves room above it for at least three of them. A portrait sits above the box on the
+ * left: the node's 2D portrait when it names one that exists, else a 3D render of the speaker when it is loaded.
  *
  * <p>Input only sends the session id, node id and choice index; the server checks each one. Escape sends a dismiss and
  * closes the screen.
@@ -45,6 +46,10 @@ public final class DialogueScreen extends Screen {
     private static final int ROW_HEIGHT = 16;
     private static final int ROW_GAP = 2;
     private static final int CHOICE_NUMBER_WIDTH = 16;
+    /** The space between a choice row's edges and its label. */
+    private static final int CHOICE_INSET = 6;
+    /** The space between the lowest choice row and the box. */
+    private static final int CHOICE_GAP = 8;
 
     private static final int BOX_FILL = 0xD0101018;
     private static final int BOX_EDGE = 0xFF8A7F6A;
@@ -58,6 +63,8 @@ public final class DialogueScreen extends Screen {
     private static final int CHOICE_HOVER_TEXT = 0xFFFFE08A;
     private static final int CHOICE_LOCKED_TEXT = 0xFF77736A;
     private static final int PORTRAIT_FILL = 0xB0000000;
+    private static final String MORE_ABOVE = "\u25B2";
+    private static final String MORE_BELOW = "\u25BC";
     /** How long a sent choice blocks further input. The server ignores a stale pick silently, so this must expire. */
     private static final long AWAIT_TIMEOUT_MILLIS = 2000L;
 
@@ -79,6 +86,8 @@ public final class DialogueScreen extends Screen {
     private int textWidth;
     private int lineHeight;
     private final List<ChoiceRow> choiceRows = new ArrayList<>();
+    /** The position of the choice scrolled to the top of the choice list, as the last frame clamped it. */
+    private int choiceScroll;
 
     /** A choice's place on screen from the last frame, for mouse picks. {@code position} indexes the node's choices. */
     private record ChoiceRow(int position, int x0, int y0, int x1, int y1) {}
@@ -107,6 +116,7 @@ public final class DialogueScreen extends Screen {
         this.sessionId = payload.sessionId();
         this.awaitingSinceMillis = -1L;
         this.typewriter = new Typewriter(textSpeed, Util.getMillis());
+        this.choiceScroll = 0;
         layout();
     }
 
@@ -130,7 +140,9 @@ public final class DialogueScreen extends Screen {
 
         int namePart = hasName() ? NAME_HEIGHT + NAME_GAP : 0;
         int wanted = TOP_PADDING + namePart + lines.size() * lineHeight + BOTTOM_PADDING;
-        boxHeight = Math.min(Math.max(MIN_BOX_HEIGHT, wanted), height - 2 * MARGIN);
+        // Leave room above the box for a few choice rows, so a long text cannot push them into the box or off screen.
+        int choiceRoom = ChoiceLayout.reservedHeight(node.choices().size(), minChoicePitch(), CHOICE_GAP);
+        boxHeight = Math.min(Math.max(MIN_BOX_HEIGHT, wanted), height - 2 * MARGIN - choiceRoom);
         boxY = height - MARGIN - boxHeight;
         textY = boxY + TOP_PADDING + namePart;
     }
@@ -226,25 +238,55 @@ public final class DialogueScreen extends Screen {
         int rowWidth = Math.min(boxWidth * 3 / 5, widest + CHOICE_NUMBER_WIDTH + 12);
         int right = boxX + boxWidth - PADDING;
         int left = right - rowWidth;
-        int bottom = boxY - 8;
-        int top = bottom - choices.size() * (ROW_HEIGHT + ROW_GAP);
+        int labelWidth = rowWidth - 2 * CHOICE_INSET;
+        ChoiceLayout.Placement placement = ChoiceLayout.place(choices.size(), MARGIN, boxY - CHOICE_GAP,
+                ROW_HEIGHT + ROW_GAP, ROW_HEIGHT, minChoicePitch(), choiceScroll);
+        choiceScroll = placement.first();
+        List<ChoiceLayout.Row> rows = placement.rows();
 
-        for (int i = 0; i < choices.size(); i++) {
+        for (ChoiceLayout.Row row : rows) {
+            int i = row.choice();
             ChoiceView choice = choices.get(i);
-            int y0 = top + i * (ROW_HEIGHT + ROW_GAP);
-            int y1 = y0 + ROW_HEIGHT;
+            int y0 = row.y();
+            int y1 = y0 + row.height();
             boolean hovered = mouseX >= left && mouseX < right && mouseY >= y0 && mouseY < y1;
             choiceRows.add(new ChoiceRow(i, left, y0, right, y1));
 
             graphics.fill(left, y0, right, y1, hovered && choice.enabled() ? CHOICE_HOVER_FILL : CHOICE_FILL);
             int color = !choice.enabled() ? CHOICE_LOCKED_TEXT : hovered ? CHOICE_HOVER_TEXT : CHOICE_TEXT;
             String number = i < ChoiceKeys.MAX_KEYED_CHOICES ? (i + 1) + ". " : "";
-            graphics.text(font, Component.literal(number).append(choice.text()), left + 6, y0 + 4, color);
+            // The first line that fits the row. A label wider than the row is cut short, not drawn past the screen edge.
+            List<FormattedCharSequence> fitted = font.split(Component.literal(number).append(choice.text()), labelWidth);
+            if (!fitted.isEmpty()) {
+                int textY = y0 + (row.height() - font.lineHeight + 1) / 2;
+                graphics.text(font, fitted.getFirst(), left + CHOICE_INSET, textY, color);
+            }
 
             if (hovered && !choice.enabled() && choice.unavailableReason().isPresent()) {
                 graphics.setTooltipForNextFrame(font, choice.unavailableReason().get(), mouseX, mouseY);
             }
         }
+        // Arrows beside the list when choices are scrolled out of view above or below it.
+        if (!rows.isEmpty() && placement.hiddenAbove() > 0) {
+            ChoiceLayout.Row top = rows.getFirst();
+            graphics.text(font, MORE_ABOVE, left - font.width(MORE_ABOVE) - 3,
+                    top.y() + (top.height() - font.lineHeight + 1) / 2, HINT);
+        }
+        if (!rows.isEmpty() && placement.hiddenBelow() > 0) {
+            ChoiceLayout.Row bottom = rows.getLast();
+            graphics.text(font, MORE_BELOW, left - font.width(MORE_BELOW) - 3,
+                    bottom.y() + (bottom.height() - font.lineHeight + 1) / 2, HINT);
+        }
+    }
+
+    /** The smallest choice pitch that holds a line of text: the line, a pixel above it, and a pixel between rows. */
+    private int minChoicePitch() {
+        return font.lineHeight + 2;
+    }
+
+    /** Scrolls the choice list by {@code rows}; positive shows later choices. The next frame clamps the offset. */
+    private void scrollChoices(int rows) {
+        choiceScroll = Math.max(0, choiceScroll + rows);
     }
 
     private void drawContinueHint(GuiGraphicsExtractor graphics, boolean textDone) {
@@ -261,6 +303,10 @@ public final class DialogueScreen extends Screen {
         int key = event.key();
         if (key == GLFW.GLFW_KEY_SPACE || key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
             advance();
+            return true;
+        }
+        if ((key == GLFW.GLFW_KEY_UP || key == GLFW.GLFW_KEY_DOWN) && !node.choices().isEmpty()) {
+            scrollChoices(key == GLFW.GLFW_KEY_UP ? -1 : 1);
             return true;
         }
         int position = ChoiceKeys.positionForKey(key, node.choices().size());
@@ -283,6 +329,16 @@ public final class DialogueScreen extends Screen {
             advance();
         }
         return true;
+    }
+
+    /** The wheel scrolls the choice list. Scrolling a list that fits does nothing, because each frame clamps it. */
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (scrollY != 0.0 && node != null && !node.choices().isEmpty()) {
+            scrollChoices(scrollY > 0.0 ? -1 : 1);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     /** Escape: tell the server the player dismissed the conversation, then close. */

@@ -19,11 +19,13 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import town.lampas.haruhi.api.HaruhiServices;
 
@@ -63,6 +65,10 @@ final class NpcCommands {
         CommandSourceStack source = context.getSource();
         Identifier profileId = IdentifierArgument.getId(context, "profile");
         requireProfile(profileId);
+        // The same check /summon makes: an NPC above or below the world would never be reachable.
+        if (!Level.isInSpawnableBounds(BlockPos.containing(pos))) {
+            throw fail("Invalid position for spawn");
+        }
 
         ServerLevel level = source.getLevel();
         NpcEntity npc = NpcEntities.NPC.create(level, EntitySpawnReason.COMMAND);
@@ -70,7 +76,7 @@ final class NpcCommands {
             throw fail("The NPC entity type could not be created");
         }
         npc.setPos(pos.x, pos.y, pos.z);
-        npc.setYRot(source.getRotation().y);
+        npc.turnTo(source.getRotation().y);
         npc.setProfile(profileId);
         level.addFreshEntity(npc);
         source.sendSuccess(() -> Component.literal("Spawned NPC " + describe(npc)), true);

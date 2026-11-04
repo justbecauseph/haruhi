@@ -59,8 +59,18 @@ public final class GeckoNpcRenderer extends EntityRenderer<NpcEntity, LivingEnti
                 .triggerAnim(entity, null, animation);
     }
 
+    /** The animations file for the entity's look, after the same model fallback {@link NpcGeoModel} makes. */
     private static Identifier animationsFor(NpcEntity entity) {
-        return NpcLookAssets.resolveAnimations(entity.look().animations(), NpcLookAssets::resourceExists);
+        return BakedAssets.animations(entity.look());
+    }
+
+    /**
+     * The shadow grows with the NPC's scale, as the vanilla living renderer's does. The model is scaled by the same
+     * {@code state.scale}, so the shadow matches it.
+     */
+    @Override
+    protected float getShadowRadius(LivingEntityRenderState state) {
+        return super.getShadowRadius(state) * state.scale;
     }
 
     private GeoReplacedEntityRenderer<NpcAnimatable, NpcEntity, EntityRenderState> createRenderer(Identifier animations) {
