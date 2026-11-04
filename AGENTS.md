@@ -196,3 +196,47 @@ fixture use exactly these.
 | action | `haruhi:command` | `command`: run as the player at the permission level set in `config/haruhi-dialogue.json`. Only runs when the command's first word is on that file's allowlist, which is empty by default. A command not on the list is a validation error. |
 
 Haruhi registers no providers itself. The API exists for consumers such as the Guild board.
+
+## Blockbench model converter
+
+`src/tools` holds a Blockbench `.bbmodel` to GeckoLib converter. It is a separate `tools` source set, not part of the
+mod jar; its unit tests are in `src/test/java/town/lampas/haruhi/tools/` and run with `test`.
+
+```
+.\gradlew.bat bbmodel --args='<in.bbmodel> <outputRoot> <namespace> <name>'
+```
+
+It writes, under `<outputRoot>`:
+
+- `assets/<namespace>/geckolib/models/<name>.geo.json`: Bedrock geometry, format 1.12.0 (1.21.0 when a face has a UV
+  rotation);
+- `assets/<namespace>/geckolib/animations/<name>.animation.json`: Bedrock animations, format 1.8.0, when the project has
+  animations;
+- `assets/<namespace>/textures/entity/<name>.png`.
+
+It prints the bones, cubes, skipped elements, textures used and ignored, texture size, animations and warnings, then
+the profile fields: `"model": "<namespace>:<name>"`, `"animations": "<namespace>:<name>"`,
+`"texture": "<namespace>:textures/entity/<name>.png"`. Relative paths resolve against the project directory.
+
+The rules follow Blockbench's own Bedrock export (its source is in the installed Blockbench's `resources/app.asar`),
+cited in the code: X mirroring of origins, pivots and rotations, per-face UV with the up/down flip, box UV with
+`uv_offset` and mirror, `export: false`, group pivots and rotations, keyframe sign flips (bbmodel files before format 5.0
+store Bedrock signs), loop modes, and catmullrom and step keyframes as Bedrock `pre`/`post`/`lerp_mode`.
+`GeckoLibBakeTest` has GeckoLib 5.5.5 bake converted output and checks pivots, rotations and every face's UVs.
+
+- **Textures:** per-texture `uv_width`/`uv_height`, else the project resolution. One used texture is copied and keeps
+  its UV space. Several used textures are stitched into one atlas in pixels, with each face's UV remapped and scaled.
+  Textures no face uses are left out. Animated textures keep their first frame.
+- **Bones:** outliner groups; elements at the root go in a first bone, `bb_main`. Names are reduced to `[A-Za-z0-9_.-]`
+  and made unique with a number suffix (the first keeps its name). Animators follow the renamed bones.
+- **Box UV:** kept when GeckoLib can draw it as Blockbench does. A box UV cube with a face that is not drawn, faces on
+  different textures, a scaled texture or a fractional size is written per face instead.
+- **Skipped, with a warning:** meshes, locators, null objects, texture meshes and other non-cube elements; faces with
+  texture `null`; effect (sound, particle, timeline) keyframes; animators of non-bone elements.
+- **Changed, with a warning:** bezier keyframes are written linear (Blockbench samples the curve); quaternion
+  interpolation is written as Euler angles; an animation set to play once that has no length is written to loop, as
+  Blockbench does.
+- **Written but ignored by GeckoLib 5.5.5, with a warning:** `override_previous_animation`, `anim_time_update`,
+  `blend_weight`, `start_delay`, `loop_delay`, `relative_to` and bone `binding`. Molang strings are kept as strings and
+  checked against GeckoLib's parser, functions and queries.
+- Compressed `.bbmodel` files are refused; save them uncompressed first.

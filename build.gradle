@@ -17,7 +17,21 @@ repositories {
 	}
 }
 
+// The Blockbench .bbmodel to GeckoLib converter in src/tools, run with the bbmodel task below. It is not part of the mod
+// jar; the unit tests see its classes.
+sourceSets {
+	tools
+	test {
+		compileClasspath += sourceSets.tools.output
+		runtimeClasspath += sourceSets.tools.output
+	}
+}
+
 dependencies {
+	// Gson at the version Minecraft 26.2 ships. The tools source set has no Minecraft classpath of its own.
+	toolsImplementation 'com.google.code.gson:gson:2.14.0'
+	testImplementation 'com.google.code.gson:gson:2.14.0'
+
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
@@ -66,6 +80,14 @@ test {
 	// ArchitectureTest reads the compiled main classes.
 	dependsOn 'classes'
 	systemProperty 'haruhi.mainClasses', sourceSets.main.output.classesDirs.asPath
+}
+
+// .\gradlew.bat bbmodel --args='<in.bbmodel> <outputRoot> <namespace> <name>' (see the AGENTS.md section on the tool).
+tasks.register('bbmodel', JavaExec) {
+	group = 'haruhi'
+	description = 'Converts a Blockbench .bbmodel into a GeckoLib model, animations and texture.'
+	classpath = sourceSets.tools.runtimeClasspath
+	mainClass = 'town.lampas.haruhi.tools.bbmodel.BbmodelCli'
 }
 
 processResources {
