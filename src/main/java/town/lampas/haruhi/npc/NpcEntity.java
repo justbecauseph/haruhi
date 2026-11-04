@@ -1,0 +1,195 @@
+package town.lampas.haruhi.npc;
+
+import java.util.Optional;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.DamageTypeTags;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+import net.minecraft.world.phys.Vec3;
+import org.jspecify.annotations.Nullable;
+import town.lampas.haruhi.api.HaruhiServices;
+import town.lampas.haruhi.content.model.ContentBundle;
+import town.lampas.haruhi.content.model.NpcProfile;
+
+/**
+ * A non-moving character. It is a living entity only so that it can carry the vanilla scale attribute and the default
+ * attributes; it has no goals, never falls, is not pushed, never despawns, and takes no damage except {@code /kill} and the
+ * void. Right-clicking it with the main hand faces the player and opens the profile's dialogue.
+ *
+ * <p>The profile id is saved. The look is recomputed from the active content when the profile is set, when the entity is
+ * first ticked after loading, and when a content revision activates.
+ */
+public class NpcEntity extends LivingEntity {
+    static final EntityDataAccessor<NpcLook> LOOK = SynchedEntityData.defineId(NpcEntity.class, NpcLook.SERIALIZER);
+
+    private static final String PROFILE_KEY = "profile";
+
+    private @Nullable Identifier profileId;
+    /** True until the first tick after a load or a profile change refreshes the look from the active content. */
+    private boolean lookStale = true;
+
+    public NpcEntity(EntityType<? extends NpcEntity> type, Level level) {
+        super(type, level);
+        setNoGravity(true);
+    }
+
+    /** The profile id this NPC was given; empty before one is set. */
+    public Optional<Identifier> profileId() {
+        return Optional.ofNullable(profileId);
+    }
+
+    /** The profile in the active content, or empty when there is none or it is missing from the active revision. */
+    public Optional<NpcProfile> profile() {
+        if (profileId == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(HaruhiServices.content().active().npcs().get(profileId));
+    }
+
+    /** The look the server last synced to this entity. Safe on both sides. */
+    public NpcLook look() {
+        return entityData.get(LOOK);
+    }
+
+    /** Gives this NPC a profile and refreshes its look from the active content. Server thread only. */
+    public void setProfile(Identifier id) {
+        this.profileId = id;
+        this.lookStale = false;
+        refreshLook(HaruhiServices.content().active());
+    }
+
+    /**
+     * Recomputes the synced look, name and scale from the profile in {@code bundle}. A profile missing from the bundle gives
+     * the default look, and its id as the name plate. Server thread only.
+     */
+    public void refreshLook(ContentBundle bundle) {
+        Optional<NpcProfile> profile = profileId == null
+                ? Optional.empty()
+                : Optional.ofNullable(bundle.npcs().get(profileId));
+        entityData.set(LOOK, profile.map(NpcLook::of).orElse(NpcLook.DEFAULT));
+
+        AttributeInstance scale = getAttribute(Attributes.SCALE);
+        double wanted = profile.map(p -> (double) p.scale()).orElse(1.0);
+        if (scale != null && scale.getBaseValue() != wanted) {
+            scale.setBaseValue(wanted);
+            refreshDimensions();
+        }
+
+        Component name = profile.map(NpcProfile::name)
+                .orElseGet(() -> profileId == null ? null : Component.literal(profileId.toString()));
+        setCustomName(name);
+        setCustomNameVisible(profile.isPresent());
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (lookStale && !level().isClientSide()) {
+            lookStale = false;
+            refreshLook(HaruhiServices.content().active());
+        }
+    }
+
+    /**
+     * Invulnerable to everything except the damage types that bypass invulnerability, which are {@code /kill} and the
+     * void. Creative players are not exempt.
+     */
+    @Override
+    public boolean isInvulnerableTo(ServerLevel level, DamageSource source) {
+        return !source.is(DamageTypeTags.BYPASSES_INVULNERABILITY);
+    }
+
+    @Override
+    public HumanoidArm getMainArm() {
+        return HumanoidArm.RIGHT;
+    }
+
+    @Override
+    public boolean isPushable() {
+        return false;
+    }
+
+    /** An NPC does not shove the players and mobs that stand against it. */
+    @Override
+    protected void pushEntities() {}
+
+    @Override
+    public boolean isPushedByFluid() {
+        return false;
+    }
+
+    @Override
+    public boolean isAffectedByFluids() {
+        return false;
+    }
+
+    @Override
+    public boolean canBeCollidedWith(Entity other) {
+        return false;
+    }
+
+    @Override
+    public InteractionResult interact(Player player, InteractionHand hand, Vec3 location) {
+        if (hand != InteractionHand.MAIN_HAND) {
+            return InteractionResult.PASS;
+        }
+        if (level().isClientSide()) {
+            return InteractionResult.SUCCESS;
+        }
+        if (player instanceof ServerPlayer serverPlayer) {
+            profile().flatMap(NpcProfile::dialogue).ifPresent(graph -> {
+                faceTowards(player);
+                HaruhiServices.dialogue().open(serverPlayer, graph, this);
+            });
+        }
+        return InteractionResult.SUCCESS;
+    }
+
+    /** Turns the NPC's yaw to look at {@code target}, keeping it level. */
+    private void faceTowards(Entity target) {
+        double dx = target.getX() - getX();
+        double dz = target.getZ() - getZ();
+        float yRot = (float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F;
+        setRot(yRot, 0.0F);
+        setYBodyRot(yRot);
+        setYHeadRot(yRot);
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(LOOK, NpcLook.DEFAULT);
+    }
+
+    @Override
+    protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
+        this.profileId = input.read(PROFILE_KEY, Identifier.CODEC).orElse(null);
+        this.lookStale = true;
+    }
+
+    @Override
+    protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
+        if (profileId != null) {
+            output.store(PROFILE_KEY, Identifier.CODEC, profileId);
+        }
+    }
+}
