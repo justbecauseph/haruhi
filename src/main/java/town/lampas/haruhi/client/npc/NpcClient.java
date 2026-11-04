@@ -4,6 +4,7 @@ import java.util.Optional;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import town.lampas.haruhi.client.npc.gecko.GeckoNpcSupport;
 import town.lampas.haruhi.network.NpcAnimationPayload;
 import town.lampas.haruhi.npc.NpcEntities;
@@ -33,6 +34,17 @@ public final class NpcClient {
     public static void playAnimation(int entityId, String animation) {
         if (FabricLoader.getInstance().isModLoaded(GECKOLIB_MOD_ID)) {
             GeckoNpcSupport.playAnimation(entityId, animation);
+        }
+    }
+
+    /**
+     * Turns {@code state} to {@code bodyRot} with the head straight, for a GeckoLib render state, whose renderer reads the
+     * body yaw from GeckoLib's own data rather than {@code LivingEntityRenderState.bodyRot}. Does nothing without
+     * GeckoLib or for other states. Client thread only.
+     */
+    public static void turnGeckoBody(EntityRenderState state, float bodyRot) {
+        if (FabricLoader.getInstance().isModLoaded(GECKOLIB_MOD_ID)) {
+            GeckoNpcSupport.turnBody(state, bodyRot);
         }
     }
 

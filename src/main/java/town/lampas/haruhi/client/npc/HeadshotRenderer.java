@@ -49,6 +49,7 @@ public final class HeadshotRenderer {
             living.xRot = 0.0F;
             scale = living.scale;
         }
+        NpcClient.turnGeckoBody(state, HeadshotFraming.BODY_ROT);
         HeadshotFraming.Framing framing = frame(entity, state, scale, size);
         graphics.enableScissor(x0, y0, x1, y1);
         graphics.entity(state, framing.scale(), framing.translation(), framing.rotation(), framing.cameraAngle(),
