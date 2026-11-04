@@ -19,8 +19,11 @@ The Guild itself is a later consumer and is not in this repository.
 ./gradlew runClient      # dev client, for checking the screen and renderer by hand
 ```
 
-- Testcontainers tests need Docker. Annotate them `@Testcontainers(disabledWithoutDocker = true)` so `build` still
-  passes on a machine without Docker. Say in your report when they were skipped.
+- Testcontainers tests need Docker. Annotate them `@Testcontainers(disabledWithoutDocker = true)` (from
+  `testcontainers-junit-jupiter`, a test dependency) so `build` still passes on a machine without Docker. Say in your
+  report when they were skipped.
+- GameTests that activate content wait until `HaruhiServices.content().isStartupComplete()` first, so the startup
+  activation cannot replace their fixture.
 - Java 25. Minecraft 26.2 names: `Identifier` (not `ResourceLocation`) and `EntityTypes` holders. Use permission checks
   such as `Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)`, or `Permissions.COMMANDS_ADMIN` from
   `net.minecraft.server.permissions`.
@@ -142,9 +145,20 @@ Field rules (the content component enforces them, and other components rely on t
   - `when_unavailable` is `hidden` (the default) or `grayed_out`.
   - `only_if` and `actions` default to empty.
 - **Graph and bundle rules:**
-  - `start` must exist, and every node must be reachable from it.
-  - Every `speaker` and NPC `dialogue` must exist in the bundle.
+  - `start` must exist, and every node must be reachable from it. Edges are `next`, choice `next`, `random` and
+    `haruhi:goto` targets.
+  - One exception: in a graph where a node reachable from `start` holds a provider choice, nodes that no edge reaches
+    are allowed, because a provider names its next node at run time. A provider in an unreachable node does not
+    count.
+  - Every `speaker`, NPC `dialogue` and `haruhi:open` graph must exist in the bundle.
   - A flag used by any condition or action must be declared under `flags`.
+  - Unknown keys are errors at every level (bundle, NPC, graph, node, choice, router branch). A misspelt `only_if`
+    must fail validation, never silently drop a gate.
+  - Two keys that parse to the same id (`guard` and `minecraft:guard`) are an error.
+  - Router weights must sum to at most `Integer.MAX_VALUE`. Flag namespaces and names must be non-empty and contain
+    no NUL character.
+- **Portrait:** the visual-novel screen shows the node's `portrait`, else the speaking profile's `portrait` (resolved on
+  the server and sent in the payload), else a 3D render of the speaker entity when it is loaded, else none.
 
 The model and texture ids are client assets. The server cannot check them, so the client falls back to the default
 model and the Steve skin when one is missing.

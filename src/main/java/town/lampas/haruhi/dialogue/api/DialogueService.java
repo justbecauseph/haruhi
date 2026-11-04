@@ -16,7 +16,9 @@ public interface DialogueService {
      */
     boolean open(ServerPlayer player, Identifier graphId, @Nullable Entity interlocutor);
 
+    /** Ends the player's conversation, or cancels one still queued until their flags load. */
     void close(ServerPlayer player);
 
+    /** True while the player has a conversation open, or one queued until their flags load. */
     boolean isInDialogue(ServerPlayer player);
 }

@@ -29,4 +29,13 @@ public interface ContentService {
      * reverts to the stored active revision.
      */
     void activateUnstored(ContentBundle bundle);
+
+    /**
+     * True once this server's startup activation has finished, whether it activated a revision, the config bundle,
+     * the seed, or nothing because validation failed. GameTests wait for this before activating their own fixtures,
+     * so a late startup activation cannot replace them. False again after the server stops.
+     */
+    default boolean isStartupComplete() {
+        return true;
+    }
 }
