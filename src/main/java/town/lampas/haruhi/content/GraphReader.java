@@ -20,13 +20,23 @@ final class GraphReader {
     private final DynamicOps<JsonElement> ops;
     private final Problems problems;
     private final Set<Identifier> npcIds;
+    private final Set<Identifier> graphIds;
     private final List<SpecSite> specs;
 
-    /** {@code specs} collects every spec that parses, from every node this reader reads. */
-    GraphReader(DynamicOps<JsonElement> ops, Problems problems, Set<Identifier> npcIds, List<SpecSite> specs) {
+    /**
+     * {@code graphIds} holds every graph of the bundle. {@code specs} collects every spec that parses, from every node
+     * this reader reads.
+     */
+    GraphReader(
+            DynamicOps<JsonElement> ops,
+            Problems problems,
+            Set<Identifier> npcIds,
+            Set<Identifier> graphIds,
+            List<SpecSite> specs) {
         this.ops = ops;
         this.problems = problems;
         this.npcIds = npcIds;
+        this.graphIds = graphIds;
         this.specs = specs;
     }
 
@@ -53,7 +63,7 @@ final class GraphReader {
         }
 
         Set<String> nodeIds = nodes.get().keySet();
-        NodeReader nodeReader = new NodeReader(ops, problems, graphId, nodeIds, npcIds, specs);
+        NodeReader nodeReader = new NodeReader(ops, problems, graphId, nodeIds, npcIds, graphIds, specs);
         Map<String, DialogueNode> parsed = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> entry : nodes.get().entrySet()) {
             nodeReader.read(entry.getKey(), entry.getValue()).ifPresent(node -> parsed.put(entry.getKey(), node));

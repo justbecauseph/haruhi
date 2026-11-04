@@ -10,11 +10,10 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.Util;
 import town.lampas.haruhi.Haruhi;
-import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.storage.StoredRevision;
 
 /**
@@ -44,17 +43,29 @@ final class ContentStartup {
         record Refused(String message, Optional<Throwable> cause) implements Choice {}
     }
 
-    static CompletableFuture<Void> run(MinecraftServer server, ContentServiceImpl service) {
-        Path file = BundleFiles.startupFile(FabricLoader.getInstance().getConfigDir());
+    /** Starts the startup load for the server {@code service} is attached to. */
+    static CompletableFuture<Void> run(ContentServiceImpl service) {
+        return run(service, BundleFiles.startupFile(FabricLoader.getInstance().getConfigDir()),
+                BundleFiles::readIfRegularFile, ContentStartup::readSeed);
+    }
+
+    /**
+     * The startup load, with its two file reads passed in for tests. It runs as one step of the service's activation
+     * queue, so a revision activated while the load is reading storage is applied after the load, not before it.
+     */
+    static CompletableFuture<Void> run(
+            ContentServiceImpl service,
+            Path file,
+            Function<Path, CompletableFuture<Optional<String>>> readConfig,
+            Supplier<CompletableFuture<String>> readSeed) {
         // The three reads start together. choose awaits only the ones the decision needs.
-        return choose(
+        return service.startup(() -> choose(
                         file,
-                        ServerThread.hop(server, HaruhiServices.storage().activeRevision()),
-                        ServerThread.hop(server, BundleFiles.readIfRegularFile(file)),
-                        ServerThread.hop(server, readSeed()),
+                        service.onServerThread(service.storage().activeRevision()),
+                        service.onServerThread(readConfig.apply(file)),
+                        service.onServerThread(readSeed.get()),
                         service::validate)
-                .thenCompose(choice -> activate(service, choice))
-                .whenComplete((ignored, error) -> service.startupFinished());
+                .thenCompose(choice -> activate(service, choice)));
     }
 
     /**
@@ -142,7 +153,7 @@ final class ContentStartup {
                 yield CompletableFuture.completedFuture(null);
             }
             case Choice.Imported imported -> service.store(imported.bundle(), imported.author())
-                    .thenCompose(stored -> service.activateRevision(stored.id(), imported.author()))
+                    .thenCompose(stored -> service.activateInStep(stored.id(), imported.author()))
                     .<Void>handle((revision, failure) -> {
                         if (failure != null) {
                             Haruhi.LOGGER.error("Could not store and activate the content bundle from {}",

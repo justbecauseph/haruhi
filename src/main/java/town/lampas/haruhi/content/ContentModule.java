@@ -15,7 +15,7 @@ public final class ContentModule {
         ContentServiceImpl service = new ContentServiceImpl();
         HaruhiServices.setContent(service);
         ServerLifecycleEvents.SERVER_STARTING.register(service::attach);
-        ServerLifecycleEvents.SERVER_STARTED.register(server -> ContentStartup.run(server, service));
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> ContentStartup.run(service));
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> service.detach());
         ContentCommands.register(service);
     }

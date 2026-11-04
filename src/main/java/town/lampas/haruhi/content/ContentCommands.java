@@ -17,7 +17,6 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.storage.RevisionSummary;
 import town.lampas.haruhi.storage.StoredRevision;
@@ -101,7 +100,7 @@ final class ContentCommands {
     }
 
     private static int list(CommandSourceStack source, ContentServiceImpl service) {
-        ServerThread.hop(source.getServer(), HaruhiServices.storage().listRevisions(LIST_LIMIT))
+        ServerThread.hop(source.getServer(), service.storage().listRevisions(LIST_LIMIT))
                 .whenComplete((revisions, error) -> {
                     if (error != null) {
                         fail(source, error);

@@ -62,7 +62,8 @@ class ContentCommandsTest {
 
         for (String command : new String[] {
                 "haruhi content status", "haruhi content list", "haruhi content rollback",
-                "haruhi content activate 1", "haruhi content import greeter.json"}) {
+                "haruhi content activate 1", "haruhi content import greeter.json",
+                "haruhi content validate greeter.json"}) {
             assertThrows(CommandSyntaxException.class, () -> dispatcher.execute(command, player), command);
         }
     }

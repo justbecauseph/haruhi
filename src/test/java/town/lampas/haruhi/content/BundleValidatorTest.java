@@ -576,4 +576,52 @@ class BundleValidatorTest {
         assertEquals(List.of("bundle: flags keys 'x' and 'minecraft:x' both name minecraft:x"),
                 problems(validate(bundle)));
     }
+
+    // AGENTS.md: every haruhi:open graph must exist in the bundle. haruhi:open is a built-in this test does not
+    // register, so its own "not registered" problem may also appear; these tests look only for the graph check.
+
+    @Test
+    void openOfAGraphThatIsNotInTheBundleIsRefused() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("on_enter")
+                .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:nowhere\"}"));
+        List<String> lines = problems(validate(bundle));
+        assertTrue(lines.contains(GRAPH + "#hello: open graph 'haruhi_test:nowhere' is not a dialogue in this bundle"),
+                lines::toString);
+    }
+
+    @Test
+    void openInAChoiceOfAGraphThatIsNotInTheBundleIsRefused() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonArray("actions")
+                .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:nowhere\"}"));
+        List<String> lines = problems(validate(bundle));
+        assertTrue(lines.contains(
+                        GRAPH + "#hello, choice 1: open graph 'haruhi_test:nowhere' is not a dialogue in this bundle"),
+                lines::toString);
+    }
+
+    @Test
+    void openOfAGraphInTheBundleIsAccepted() {
+        JsonObject bundle = baseBundle();
+        bundle.getAsJsonObject("dialogues").add("haruhi_test:other",
+                JsonParser.parseString("{\"start\":\"hi\",\"nodes\":{\"hi\":{\"text\":\"Hi.\"}}}"));
+        node(bundle, "hello").getAsJsonArray("on_enter")
+                .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:other\"}"));
+        List<String> lines = problems(validate(bundle));
+        assertFalse(lines.stream().anyMatch(line -> line.contains("open graph")), lines::toString);
+    }
+
+    @Test
+    void aNodesOwnSpecProblemsComeBeforeThoseOfItsChoices() {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonArray("only_if")
+                .add(JsonParser.parseString("{\"type\":\"haruhi_test:missing\"}"));
+        node(bundle, "hello").getAsJsonArray("on_enter")
+                .add(JsonParser.parseString("{\"type\":\"haruhi_test:missing_action\"}"));
+        assertEquals(List.of(
+                        GRAPH + "#hello: action haruhi_test:missing_action is not registered",
+                        GRAPH + "#hello, choice 1: condition haruhi_test:missing is not registered"),
+                problems(validate(bundle)));
+    }
 }

@@ -71,7 +71,7 @@ final class BundleReader {
         }
 
         List<SpecSite> specs = new ArrayList<>();
-        GraphReader graphReader = new GraphReader(ops, problems, npcIds, specs);
+        GraphReader graphReader = new GraphReader(ops, problems, npcIds, graphIds, specs);
         Map<Identifier, DialogueGraph> graphs = new LinkedHashMap<>();
         Map<Identifier, String> graphKeys = new HashMap<>();
         Set<Identifier> complete = new HashSet<>();

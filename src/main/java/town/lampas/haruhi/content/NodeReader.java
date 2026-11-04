@@ -19,12 +19,15 @@ import town.lampas.haruhi.content.model.WeightedNext;
 /**
  * Reads the nodes of one graph: text, speaker, routing, choices and actions. Node references (next, random, choice
  * next, goto) are checked against every node id in the graph, including nodes that failed to parse, so one broken node
- * does not make its neighbours look like dangling references. Every condition, action and provider that parses is
- * recorded as a {@link SpecSite}, even when its node fails.
+ * does not make its neighbours look like dangling references. A {@code haruhi:open} graph is checked against every graph
+ * key of the bundle in the same way. Every condition, action and provider that parses is recorded as a
+ * {@link SpecSite}, even when its node fails.
  */
 final class NodeReader {
     /** The built-in action that moves to another node of the same graph. Its {@code node} argument names that node. */
     static final Identifier GOTO = Identifier.fromNamespaceAndPath("haruhi", "goto");
+    /** The built-in action that opens another graph. Its {@code graph} argument names a graph of the same bundle. */
+    static final Identifier OPEN = Identifier.fromNamespaceAndPath("haruhi", "open");
 
     /** The keys a node may have. Any other key is an error. */
     static final Set<String> NODE_KEYS = Set.of(
@@ -40,20 +43,24 @@ final class NodeReader {
     private final Identifier graph;
     private final Set<String> nodeIds;
     private final Set<Identifier> npcIds;
+    private final Set<Identifier> graphIds;
     private final List<SpecSite> specs;
 
+    /** {@code graphIds} holds every graph of the bundle, which {@code haruhi:open} actions may name. */
     NodeReader(
             DynamicOps<JsonElement> ops,
             Problems problems,
             Identifier graph,
             Set<String> nodeIds,
             Set<Identifier> npcIds,
+            Set<Identifier> graphIds,
             List<SpecSite> specs) {
         this.ops = ops;
         this.problems = problems;
         this.graph = graph;
         this.nodeIds = nodeIds;
         this.npcIds = npcIds;
+        this.graphIds = graphIds;
         this.specs = specs;
     }
 
@@ -79,6 +86,8 @@ final class NodeReader {
         Optional<Component> text = router
                 ? fields.optional("text", JsonValues.text(ops))
                 : fields.required("text", JsonValues.text(ops));
+        // The node's own specs come before its choices' specs, as on_enter runs before the choices show.
+        int firstSpec = specs.size();
         List<DialogueChoice> choices = router ? List.of() : readChoices(fields, nodeId, where);
 
         Optional<String> next = fields.optional("next", JsonValues::string);
@@ -89,10 +98,10 @@ final class NodeReader {
         Optional<String> animation = fields.optional("animation", JsonValues::string);
         Optional<Identifier> portrait = fields.optional("portrait", JsonValues::identifier);
         List<ActionSpec> onEnter = fields.list("on_enter", SpecReader::action);
-        checkGotos(onEnter, where);
-        for (ActionSpec action : onEnter) {
-            specs.add(new SpecSite(SpecSite.Kind.ACTION, graph, nodeId, where, action.type(), action.args()));
-        }
+        checkTargets(onEnter, where);
+        specs.addAll(firstSpec, onEnter.stream()
+                .map(action -> new SpecSite(SpecSite.Kind.ACTION, graph, nodeId, where, action.type(), action.args()))
+                .toList());
 
         if (problems.count() > mark) {
             return Optional.empty();
@@ -177,7 +186,7 @@ final class NodeReader {
         DialogueChoice.Unavailable whenUnavailable = unavailable(fields);
         Optional<Component> unavailableMessage = fields.optional("unavailable_message", JsonValues.text(ops));
         List<ActionSpec> actions = fields.list("actions", SpecReader::action);
-        checkGotos(actions, where);
+        checkTargets(actions, where);
 
         for (ConditionSpec condition : onlyIf) {
             specs.add(new SpecSite(SpecSite.Kind.CONDITION, graph, nodeId, where, condition.type(), condition.args()));
@@ -210,14 +219,25 @@ final class NodeReader {
         };
     }
 
-    private void checkGotos(List<ActionSpec> actions, String where) {
+    /**
+     * A {@code haruhi:goto} must name a node of this graph and a {@code haruhi:open} a graph of this bundle. An argument
+     * that is missing or not a valid name is left to the action type, which reports it when it parses.
+     */
+    private void checkTargets(List<ActionSpec> actions, String where) {
         for (ActionSpec action : actions) {
-            if (!GOTO.equals(action.type())) {
-                continue;
-            }
-            JsonElement target = action.args().get("node");
-            if (target != null && JsonValues.isString(target)) {
-                requireNode(target.getAsString(), "goto node", where);
+            if (GOTO.equals(action.type())) {
+                JsonElement target = action.args().get("node");
+                if (target != null && JsonValues.isString(target)) {
+                    requireNode(target.getAsString(), "goto node", where);
+                }
+            } else if (OPEN.equals(action.type())) {
+                JsonElement target = action.args().get("graph");
+                Identifier id = target != null && JsonValues.isString(target)
+                        ? Identifier.tryParse(target.getAsString())
+                        : null;
+                if (id != null && !graphIds.contains(id)) {
+                    problems.add(where, "open graph '" + id + "' is not a dialogue in this bundle");
+                }
             }
         }
     }
