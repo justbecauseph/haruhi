@@ -77,6 +77,41 @@ class ActivationOrderTest {
         assertEquals("Four", npcName(service.active()));
     }
 
+    /**
+     * Two activations are requested before either storage call completes. Each storage call is completed by hand, and
+     * the server runs what it queued after each one, so the test sees each step. The second activation may not read
+     * storage until the first has finished, and once both have finished the bundle in memory is the one storage marks
+     * active.
+     */
+    @Test
+    void aSecondActivationStartsOnlyAfterTheFirstHasFinished() {
+        long first = storage.add(bundleNamed("First"), NOW.minusSeconds(20));
+        long second = storage.add(bundleNamed("Second"), NOW.minusSeconds(10));
+
+        CompletableFuture<StoredRevision> activatedFirst = service.activateRevision(first, "admin");
+        CompletableFuture<StoredRevision> activatedSecond = service.activateRevision(second, "admin");
+        assertEquals(List.of("loadRevision " + first), waitingCalls(),
+                "only the first activation may reach storage until it has finished");
+
+        completeByHand("loadRevision " + first);
+        assertEquals(List.of("activateRevision " + first), waitingCalls());
+
+        completeByHand("activateRevision " + first);
+        assertEquals(first, finished(activatedFirst).id());
+        assertEquals(List.of("loadRevision " + second), waitingCalls(),
+                "the second activation reads storage only after the first has finished");
+        assertFalse(activatedSecond.isDone());
+
+        completeByHand("loadRevision " + second);
+        completeByHand("activateRevision " + second);
+
+        assertEquals(second, finished(activatedSecond).id());
+        assertEquals(Optional.of(second), storage.activeId());
+        assertEquals(OptionalLong.of(second), service.activeRevisionId(),
+                "memory holds the revision storage marks active");
+        assertEquals("Second", npcName(service.active()));
+    }
+
     @ParameterizedTest
     @EnumSource(Schedule.class)
     void aRollbackRequestedRightAfterAnActivationSeesThatActivation(Schedule schedule) {
@@ -159,6 +194,21 @@ class ActivationOrderTest {
     private static <T> T finished(CompletableFuture<T> future) {
         assertTrue(future.isDone(), "the request did not finish once storage and the server settled");
         return future.join();
+    }
+
+    /** The names of the storage calls that are waiting to be completed, oldest first. */
+    private List<String> waitingCalls() {
+        return storage.waiting().stream().map(Object::toString).toList();
+    }
+
+    /** Completes the one waiting storage call with {@code name}, then runs the server tasks it queued. */
+    private void completeByHand(String name) {
+        ScriptedStorage.Call<?> call = storage.waiting().stream()
+                .filter(waiting -> waiting.toString().equals(name))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no storage call " + name + " is waiting: " + waitingCalls()));
+        call.complete();
+        server.runQueued();
     }
 
     private CompletableFuture<Void> startupWithSeed(String seed) {
