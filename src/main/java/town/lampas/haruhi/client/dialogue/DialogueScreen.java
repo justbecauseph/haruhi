@@ -33,7 +33,8 @@ import town.lampas.haruhi.network.DialogueNodePayload;
  * and once it is finished a further press continues when the node has no choices. Choices stack above the box on the
  * right, and the number keys or a click pick them once the text is finished. When more choices are offered than fit,
  * the list scrolls with the mouse wheel or the Up and Down keys, and the box leaves room above it for at least three of
- * them. The screen draws no background, so the world stays in view behind it.
+ * them. The screen draws no background, so the world stays in view behind it; {@link DialogueHud} hides the HUD
+ * elements the box would cover and moves the chat above the box ({@link #boxTop()}).
  *
  * <p>Input only sends the session id, node id and choice index; the server checks each one. Escape sends a dismiss and
  * closes the screen.
@@ -98,6 +99,11 @@ public final class DialogueScreen extends Screen {
     /** The server's id for the conversation on this screen. */
     public int sessionId() {
         return sessionId;
+    }
+
+    /** The top edge of the text box in GUI pixels, from the last layout; empty before the first layout. */
+    OptionalInt boxTop() {
+        return box == null ? OptionalInt.empty() : OptionalInt.of(box.boxY());
     }
 
     /** The entity this screen names as the speaker, when the node names one. */
