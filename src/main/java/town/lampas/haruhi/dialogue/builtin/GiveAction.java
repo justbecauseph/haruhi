@@ -60,9 +60,9 @@ final class GiveAction {
                         TYPE, playerId, lootTableId, error);
                 return;
             }
-            ServerThread.execute(server, "the haruhi:give of " + lootTableId + " for " + playerId
-                    + ", whose once flag is stored, so it must be granted by hand",
-                    () -> rewards.give(server, playerId, lootTableId, loot));
+            ServerThread.execute(server, () -> rewards.give(server, playerId, lootTableId, loot),
+                    () -> Haruhi.LOGGER.error("Dropped the {} of {} for {}: the server has stopped after its once flag "
+                            + "was stored, so it must be granted by hand", TYPE, lootTableId, playerId));
         });
     }
 }

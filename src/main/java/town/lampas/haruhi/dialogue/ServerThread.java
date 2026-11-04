@@ -17,9 +17,17 @@ public final class ServerThread {
      * warning names {@code description} and the task is dropped.
      */
     public static void execute(BlockableEventLoop<?> server, String description, Runnable task) {
+        execute(server, task, () -> Haruhi.LOGGER.warn("Dropped {}: the server has stopped", description));
+    }
+
+    /**
+     * As {@link #execute(BlockableEventLoop, String, Runnable)}, but runs {@code onDropped} instead of the default warning
+     * when the task is dropped, for drops that need a louder log, such as a reward someone must grant by hand.
+     */
+    public static void execute(BlockableEventLoop<?> server, Runnable task, Runnable onDropped) {
         server.execute(() -> {
             if (!server.isSameThread()) {
-                Haruhi.LOGGER.warn("Dropped {}: the server has stopped", description);
+                onDropped.run();
                 return;
             }
             task.run();

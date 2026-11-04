@@ -26,13 +26,14 @@ import org.junit.jupiter.api.Test;
 class DialogueCommandsTest {
     /**
      * One command for each gated subcommand: open, close, and each flags subcommand. The flag namespace is quoted,
-     * because an unquoted string argument stops at the colon.
+     * because an unquoted string argument stops at the colon. Targets are player names, not selectors: a selector needs
+     * a permission of its own, so it would refuse a player even without the gate.
      */
     private static final List<String> GATED_COMMANDS = List.of(
             "haruhi dialogue open haruhi:example/greeter",
-            "haruhi dialogue open haruhi:example/greeter @a",
+            "haruhi dialogue open haruhi:example/greeter Alice",
             "haruhi dialogue close",
-            "haruhi dialogue close @a",
+            "haruhi dialogue close Alice",
             "haruhi flags get Alice \"haruhi:example/greeter\" met",
             "haruhi flags set Alice \"haruhi:example/greeter\" met 1",
             "haruhi flags clear Alice \"haruhi:example/greeter\" met");
@@ -67,6 +68,11 @@ class DialogueCommandsTest {
         for (CommandSourceStack source : List.of(
                 source(PermissionSet.NO_PERMISSIONS), source(LevelBasedPermissionSet.MODERATOR))) {
             for (String command : GATED_COMMANDS) {
+                // Refused at parse time by the gate. Executing would also throw for the commands without a target
+                // (the compilation source has no player), so the parse is what shows the gate.
+                ParseResults<CommandSourceStack> parsed = dispatcher.parse(command, source);
+                assertFalse(parsed.getExceptions().isEmpty() && !parsed.getReader().canRead()
+                        && parsed.getContext().getLastChild().getCommand() != null, command + " reaches a command");
                 assertThrows(CommandSyntaxException.class, () -> dispatcher.execute(command, source), command);
             }
         }

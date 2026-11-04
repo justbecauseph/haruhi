@@ -419,14 +419,16 @@ public final class NpcGameTests {
                     ServerLevel level = helper.getLevel();
                     NpcEntity npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
                     int before = npcsIn(level).size();
-                    // The source runs as the NPC, so @s selects it and no other NPC left in the test area.
+                    // The NPC is named by UUID, not a selector: a selector needs a permission of its own, so it would
+                    // refuse a no-permission source even without the npc gate.
+                    String target = npc.getStringUUID();
                     CommandSourceStack player = consoleSourceAt(level, npc.position(), 0.0F)
                             .withEntity(npc)
                             .withPermission(PermissionSet.NO_PERMISSIONS);
 
                     for (String command : new String[] {
-                            "haruhi npc spawn " + STYLED, "haruhi npc set @s " + STYLED, "haruhi npc remove @s",
-                            "haruhi npc list"}) {
+                            "haruhi npc spawn " + STYLED, "haruhi npc set " + target + " " + STYLED,
+                            "haruhi npc remove " + target, "haruhi npc list"}) {
                         helper.assertTrue(runCommand(player, command).isPresent(),
                                 "a source with no permissions ran: " + command);
                     }

@@ -19,11 +19,14 @@ import org.junit.jupiter.api.Test;
 
 /** The permission gate on the {@code /haruhi npc} command tree: spawn, set, remove and list are for gamemasters. */
 class NpcCommandsTest {
-    /** One command per subcommand. Each entity selector takes at most one entity. */
+    /**
+     * One command per subcommand. Targets are UUIDs, not selectors: a selector needs a permission of its own, so it
+     * would refuse a player even without the npc gate.
+     */
     private static final String[] SUBCOMMANDS = {
             "haruhi npc spawn haruhi:fixture/greeter",
-            "haruhi npc set @e[limit=1] haruhi:fixture/greeter",
-            "haruhi npc remove @e[limit=1]",
+            "haruhi npc set 00000000-0000-0000-0000-000000000001 haruhi:fixture/greeter",
+            "haruhi npc remove 00000000-0000-0000-0000-000000000001",
             "haruhi npc list"
     };
 
