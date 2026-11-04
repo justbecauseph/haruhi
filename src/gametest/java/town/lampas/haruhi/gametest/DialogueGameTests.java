@@ -86,8 +86,15 @@ public final class DialogueGameTests {
                     sessions.choose(player, session.id(), "greet", indexOf(helper, session, TELL_ME_MORE));
                 })
                 .thenWaitUntil(() -> {
+                    // info has no choices and next "bye", so its continue moves to bye (DialogueNode).
                     DialogueSession session = presentedAt(helper, sessions, player, "info");
                     sessions.choose(player, session.id(), "info", DialogueChoicePayload.CONTINUE);
+                })
+                .thenWaitUntil(() -> {
+                    // bye has no choices and no next, so its continue ends the conversation.
+                    DialogueSession session = presentedAt(helper, sessions, player, "bye");
+                    helper.assertTrue(session.id() == firstSession[0], "info's continue stays in the first conversation");
+                    sessions.choose(player, session.id(), "bye", DialogueChoicePayload.CONTINUE);
                 })
                 .thenExecute(() -> {
                     helper.assertFalse(sessions.isInDialogue(player), "the first conversation ended");
