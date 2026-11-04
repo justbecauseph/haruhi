@@ -5,30 +5,27 @@ one JSON content bundle, load it on the server as a stored revision, and spawn N
 player right-clicks them. Players see a visual-novel dialogue screen, and NPCs draw with Blockbench models through
 GeckoLib. Each player's dialogue flags and visit counts are stored in memory or in PostgreSQL.
 
-There is no published release. You build the jar from source.
-
 ## Features
 
-- **Dialogue graphs in JSON.** Nodes with text and choices, weighted random routers, conditions that hide or gray out
+- Dialogue graphs are JSON: nodes with text and choices, weighted random routers, conditions that hide or gray out
   choices, and actions that run on entering a node or picking a choice. A bundle is validated in full before it can
   become active, and the validator lists every problem it finds, one per line.
-- **Content revisions.** Import, validate, activate and roll back bundles with `/haruhi content` while the server runs.
-  Each revision is stored with the SHA-256 digest of its canonical JSON.
-- **Visual-novel screen.** Typed-out text, a portrait or a 3D headshot of the speaker, choices picked with a click or
-  the number keys 1 to 9. While it is open, most HUD elements under the text box are hidden and the chat moves above
-  it.
-- **NPC entity.** Stays where it is spawned, takes no damage except `/kill` and the void, turns to face the player who
-  talks to it, and scales from 1/16 up to 4 times normal size.
-- **GeckoLib models and animations** on the client, with the vanilla player model as the fallback when GeckoLib is not
+- `/haruhi content` imports, validates, activates and rolls back bundles while the server runs. Each revision is
+  stored with the SHA-256 digest of its canonical JSON.
+- The visual-novel screen types out the text, shows a portrait or a 3D headshot of the speaker, and takes choices by
+  click or the number keys 1 to 9. While it is open, most HUD elements under the text box are hidden and the chat
+  moves above it.
+- The NPC entity stays where it is spawned, takes no damage except from `/kill` and the void, turns to face the player
+  who talks to it, and scales from 1/16 up to 4 times normal size.
+- Clients draw NPCs with GeckoLib models and animations, or with the vanilla player model when GeckoLib is not
   installed.
-- **Per-character flags and visit counts**, cached on the server. Flag changes are written to storage in batches,
-  visit counts at each conversation.
-- **Built-in conditions and actions:** flags, visit counts, items, advancements, vanilla predicates, scoreboard tags,
-  permission level, time of day and weather; loot-table rewards given once per character, sounds, chat messages,
-  animations, jumps between nodes and graphs, and commands on an allowlist.
-- **Extension API.** Other mods register their own condition, action and choice-provider types.
-- **Blockbench converter.** A Gradle task converts a `.bbmodel` project into GeckoLib model, animation and texture
-  files.
+- The server caches flags and visit counts per character. Flag changes are written to storage in batches, visit counts
+  at each conversation.
+- Built-in conditions test flags, visit counts, items, advancements, vanilla predicates, scoreboard tags, permission
+  level, time of day and weather. Built-in actions give loot-table rewards once per character, play sounds and
+  animations, send chat messages, jump between nodes and graphs, and run commands on an allowlist.
+- Other mods can register their own condition, action and choice-provider types.
+- A Gradle task converts a Blockbench `.bbmodel` project into GeckoLib model, animation and texture files.
 
 ## Requirements
 
@@ -42,10 +39,9 @@ From `src/main/resources/fabric.mod.json` and `gradle.properties`:
 | Fabric API | any version; the build uses 0.158.0+26.2 | server and client |
 | GeckoLib | 5.5.5 or newer, recommended | client only |
 
-GeckoLib is a recommendation, not a requirement. The server never loads it. A client without it draws every NPC as the
-vanilla wide player model with the profile's texture as its skin, and named animations do not play. Install the
-Haruhi jar on every client as well as the server: the [server guide](docs/server-guide.md#which-side-needs-what)
-explains why.
+The server never loads GeckoLib. A client without it draws every NPC as the vanilla wide player model with the
+profile's texture as its skin, and named animations do not play. Install the Haruhi jar on every client as well as
+the server; the [server guide](docs/server-guide.md#which-side-needs-what) explains why.
 
 ## Known limitations
 
@@ -104,9 +100,9 @@ needs nothing else to use PostgreSQL.
    /haruhi flags get @s "haruhi:example/greeter" met
    ```
 
-The seed profile names the model `haruhi:example/greeter` and a portrait texture, neither of which ships in the jar.
-The greeter therefore draws as the built-in humanoid model with the Steve skin, and the dialogue screen shows a 3D
-headshot instead of the portrait.
+The seed profile names the model `haruhi:example/greeter` and a portrait texture, and the jar ships neither, so the
+greeter draws as the built-in humanoid model with the Steve skin and the dialogue screen shows a 3D headshot in place
+of the portrait.
 
 With the default in-memory storage, flags, visit counts and imported revisions are gone after a restart. Switch to
 PostgreSQL before players depend on them: see [Storage configuration](docs/server-guide.md#storage-configuration).
@@ -117,6 +113,7 @@ PostgreSQL before players depend on them: see [Storage configuration](docs/serve
 |---|---|---|
 | [Server guide](docs/server-guide.md) | server operators | installing, configuration files, storage and PostgreSQL, every `/haruhi` command, content revisions, flag persistence, troubleshooting |
 | [Content guide](docs/content-guide.md) | content writers | the bundle format, NPC profiles, dialogue graphs, built-in conditions and actions |
+| [Bundle JSON Schema](docs/bundle.schema.json) | content writers | a JSON Schema of the bundle format and built-in arguments for editors; setup is in the content guide |
 | [Models and animations](docs/models-and-animations.md) | model makers | Blockbench models, the `.bbmodel` converter, textures, animations, portraits |
 | [Developer guide](docs/developer-guide.md) | mod developers | architecture, network payloads, the extension API, building and testing, repository layout |
 
@@ -124,5 +121,4 @@ PostgreSQL before players depend on them: see [Storage configuration](docs/serve
 
 ## Licence
 
-All rights reserved. This is the `license` field of `fabric.mod.json` (`All-Rights-Reserved`); the repository has no
-separate licence file.
+Mozilla Public License 2.0. The full text is in [LICENSE](LICENSE).

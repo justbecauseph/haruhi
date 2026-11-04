@@ -1,11 +1,7 @@
 # Server guide
 
-This page is for operators who install and run Haruhi. It covers which side needs which jar, the configuration files,
-the in-memory and PostgreSQL storage backends, every `/haruhi` command, how content revisions are imported and
-activated, when flags and visit counts reach storage, and what the log messages mean.
-
-Back to the [README](../README.md). Writing bundles is in the [content guide](content-guide.md); models and textures
-are in [models and animations](models-and-animations.md).
+For operators who install and run Haruhi. Back to the [README](../README.md). Writing bundles is in the [content
+guide](content-guide.md); models and textures are in [models and animations](models-and-animations.md).
 
 - [Known limitations](#known-limitations)
 - [Install](#install)
@@ -23,19 +19,19 @@ are in [models and animations](models-and-animations.md).
 
 ## Known limitations
 
-- **Every client needs Haruhi.** The vanilla dialog fallback exists, but Fabric API's registry sync keeps a client
-  without Haruhi from joining (see [Which side needs what](#which-side-needs-what)).
-- **Hitbox.** An NPC's hitbox is 0.6 by 1.8 blocks times its profile's `scale`, whatever the size of its model.
-- **Locator bar.** While the dialogue screen is open, the waypoint markers of the multiplayer locator bar still draw
-  under the text box. Haruhi hides Fabric API's info-bar element, which covers only the bar's background; vanilla draws
-  the markers in a separate step.
-- **Client assets.** A revision carries only the ids of models, textures, animations and portraits. Each client needs
-  the files from a resource pack or a mod.
-- **In-memory storage** is the default and loses everything when the server stops.
-- **Shared databases.** A server reads the active revision only at startup, so an activation on one server does not
-  reach another server that shares its schema until that server restarts.
-- **Crash window.** Flag changes reach storage in batches every 100 ticks (5 seconds at 20 ticks per second), so a
-  crash loses the changes made since the last batch.
+- Every client needs Haruhi. The vanilla dialog fallback exists, but Fabric API's registry sync keeps a client without
+  Haruhi from joining (see [Which side needs what](#which-side-needs-what)).
+- An NPC's hitbox is 0.6 by 1.8 blocks times its profile's `scale`, whatever the size of its model.
+- While the dialogue screen is open, the waypoint markers of the multiplayer locator bar still draw under the text
+  box. Haruhi hides Fabric API's info-bar element, which covers only the bar's background; vanilla draws the markers in
+  a separate step.
+- A revision carries only the ids of models, textures, animations and portraits. Each client needs the files from a
+  resource pack or a mod.
+- The default in-memory storage loses everything when the server stops.
+- A server reads the active revision only at startup, so an activation on one server does not reach another server
+  that shares its schema until that server restarts.
+- Flag changes reach storage in batches every 100 ticks (5 seconds at 20 ticks per second), so a crash loses the
+  changes made since the last batch.
 
 ## Install
 
@@ -70,7 +66,7 @@ other client gets Minecraft's built-in dialog screen instead:
 - A node without choices has a Continue button, and Escape does not close it.
 - There is no portrait, no typed-out text and no node animation.
 
-Because of registry sync, a normal player cannot reach this fallback; a client must have Haruhi installed to join.
+Registry sync keeps a client without Haruhi from joining, so a normal player never reaches this fallback.
 
 ### Singleplayer
 
@@ -264,11 +260,11 @@ whole line at once.
 
 When the server has started, Haruhi picks one source of content:
 
-1. **The active stored revision**, if storage has one. It is validated again against this server.
-2. Otherwise **`config/haruhi/bundle.json`**, if that file exists. It is validated, stored as a new revision with the
+1. The active stored revision, if storage has one. It is validated again against this server.
+2. Otherwise `config/haruhi/bundle.json`, if that file exists. It is validated, stored as a new revision with the
    author `startup:config/haruhi/bundle.json`, and activated.
-3. Otherwise **the seed bundle** in the jar (`haruhi/seed_bundle.json`). It is stored with the author `startup:seed`
-   and activated.
+3. Otherwise the seed bundle in the jar (`haruhi/seed_bundle.json`). It is stored with the author `startup:seed` and
+   activated.
 
 Only the chosen source is tried. If it fails validation, the log lists every problem and the server runs with no
 content: no NPC profiles and no dialogue graphs. The commands still work, so you can activate a valid revision
@@ -457,19 +453,18 @@ The bundle town.json links outside /srv/minecraft/config/haruhi/bundles
 
 ### What an activation reaches
 
-- **NPCs:** every NPC in a loaded chunk, in every dimension, takes the new profile's name, look and scale straight
-  away. An NPC in an unloaded chunk takes them on its first tick after it loads. An NPC whose profile id is missing from
-  the new content keeps that id, draws with the default model and the Steve skin, gets its profile id as its custom
-  name without an always-visible name tag, and does nothing when right-clicked.
-- **Conversations:** a conversation that is already open keeps running on the content it opened with until it ends.
-  Every conversation opened afterwards, including one opened by `haruhi:open` from an old conversation, uses the new
-  content.
-- **Flags:** stored values are not touched. Which flags conditions, actions and `/haruhi flags` may use comes from the
-  active revision's declarations.
-- **Client assets:** models, textures, animations and portraits are not part of a revision. They come from resource
-  packs or mods on each client; see [models and animations](models-and-animations.md). A client that lacks one falls
-  back to the default humanoid model, the Steve skin, or the 3D headshot.
-- **Other servers:** a server that shares the same database schema reads the active revision only when it starts.
+- Every NPC in a loaded chunk, in every dimension, takes the new profile's name, look and scale straight away. An NPC
+  in an unloaded chunk takes them on its first tick after it loads. An NPC whose profile id is missing from the new
+  content keeps that id, draws with the default model and the Steve skin, gets its profile id as its custom name
+  without an always-visible name tag, and does nothing when right-clicked.
+- A conversation that is already open keeps running on the content it opened with until it ends. Every conversation
+  opened afterwards, including one opened by `haruhi:open` from an old conversation, uses the new content.
+- Stored flag values are not touched. The active revision's declarations decide which flags conditions, actions and
+  `/haruhi flags` may use.
+- Models, textures, animations and portraits are not part of a revision. They come from resource packs or mods on
+  each client; see [models and animations](models-and-animations.md). A client that lacks one falls back to the
+  default humanoid model, the Steve skin, or the 3D headshot.
+- A server that shares the same database schema reads the active revision only when it starts.
 
 ## Flags and visits
 

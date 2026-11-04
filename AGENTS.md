@@ -83,6 +83,10 @@ Each component writes its GameTests in its own class, already listed in the Game
 
 ## Content bundle format
 
+`docs/bundle.schema.json` is a JSON Schema of this format and the built-ins below, for editors. Change it with any
+change to the format or to a built-in's arguments; `BundleSchemaTest` and `BuiltinSchemaTest` fail when it disagrees
+with the reader or a built-in's parser.
+
 One JSON document. Ids are `namespace:path` strings, and text fields use Minecraft's text component JSON (a plain
 string is allowed). Every key is snake_case. A spec (condition, action or provider) is an object with `type`; its
 other keys are the arguments, stored in `ConditionSpec.args` with `type` removed.

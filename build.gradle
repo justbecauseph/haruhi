@@ -51,6 +51,7 @@ dependencies {
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testImplementation "org.testcontainers:testcontainers-postgresql:${project.testcontainers_version}"
 	testImplementation "org.testcontainers:testcontainers-junit-jupiter:${project.testcontainers_version}"
+	testImplementation "com.networknt:json-schema-validator:${project.json_schema_validator_version}"
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -79,6 +80,11 @@ test {
 	// ArchitectureTest reads the compiled main classes.
 	dependsOn 'classes'
 	systemProperty 'haruhi.mainClasses', sourceSets.main.output.classesDirs.asPath
+	// BundleSchemaTest and BuiltinSchemaTest read these from the project directory, so a change to them reruns the tests.
+	inputs.files('docs/bundle.schema.json', 'AGENTS.md', 'README.md', fileTree('docs') { include '*.md' },
+			fileTree('src/gametest/resources/haruhi/fixtures'))
+			.withPropertyName('bundleSchemaFiles')
+			.withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // .\gradlew.bat bbmodel --args='<in.bbmodel> <outputRoot> <namespace> <name>' (see the AGENTS.md section on the tool).

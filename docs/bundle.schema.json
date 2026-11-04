@@ -1,0 +1,451 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Haruhi content bundle",
+  "description": "Schema 1 of the Haruhi content bundle, with the arguments of the built-in conditions and actions. It checks the shape of each value. /haruhi content validate also checks what this schema cannot: that every referenced node, graph and NPC exists, that every node is reachable, that every flag used is declared, that no two keys name the same id, that router weights add up to at most 2147483647, that condition, action and provider types from other mods are registered, and that haruhi:command commands are on the allowlist. The bundle accepts no $schema key, so map this schema to bundle files in the editor's settings.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "Bundle format version. This build reads 1.",
+      "const": 1
+    },
+    "flags": {
+      "description": "Flag namespaces. Each key is an id, usually the graph that owns the flags; each value lists the flag names. Every flag a condition or action uses must be declared here.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/flagName" }
+      }
+    },
+    "npcs": {
+      "description": "NPC profiles, keyed by profile id.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/npc" }
+    },
+    "dialogues": {
+      "description": "Dialogue graphs, keyed by graph id.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/graph" }
+    }
+  },
+  "required": ["schema"],
+  "additionalProperties": false,
+
+  "$defs": {
+    "id": {
+      "description": "A namespace:path id. The namespace uses a-z 0-9 _ . -, the path the same plus /. Without a colon the namespace is minecraft.",
+      "type": "string",
+      "pattern": "^(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+    },
+    "int": {
+      "type": "integer",
+      "minimum": -2147483648,
+      "maximum": 2147483647
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "flagName": {
+      "description": "A flag name: any non-empty string without a NUL character.",
+      "type": "string",
+      "pattern": "^[^\\u0000]+$"
+    },
+    "text": {
+      "description": "Minecraft text component JSON: a plain string, a component object, or a non-empty array of components.",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "object" },
+        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } }
+      ]
+    },
+
+    "npc": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#/$defs/text", "description": "Shown on the name tag and as the speaker name." },
+        "texture": { "$ref": "#/$defs/id", "description": "Texture id with its full path, such as minecraft:textures/entity/player/wide/steve.png. Without model it is a 64x64 player-layout skin." },
+        "model": { "$ref": "#/$defs/id", "description": "GeckoLib model id. Default: the built-in humanoid." },
+        "animations": { "$ref": "#/$defs/id", "description": "GeckoLib animations id. Default: the model's own animations file, else the humanoid set." },
+        "portrait": { "$ref": "#/$defs/id", "description": "Texture id of a square 2D portrait for the dialogue box." },
+        "dialogue": { "$ref": "#/$defs/id", "description": "Graph opened on right-click. Must be a graph in this bundle." },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 4, "default": 1.0, "description": "Size of the model and the hitbox. Values below 0.0625 act as 0.0625." }
+      },
+      "required": ["name", "texture"],
+      "additionalProperties": false
+    },
+
+    "graph": {
+      "type": "object",
+      "properties": {
+        "start": { "type": "string", "description": "The id of the first node." },
+        "nodes": {
+          "type": "object",
+          "description": "Node ids mapped to nodes. Every node must be reachable from start, unless a reachable node holds a provider choice.",
+          "additionalProperties": { "$ref": "#/$defs/node" }
+        }
+      },
+      "required": ["start", "nodes"],
+      "additionalProperties": false
+    },
+
+    "node": {
+      "type": "object",
+      "properties": {
+        "text": { "$ref": "#/$defs/text", "description": "What the speaker says. Required on every node except a router." },
+        "choices": { "type": "array", "items": { "$ref": "#/$defs/choice" }, "description": "Choices, shown in order." },
+        "next": { "type": "string", "description": "Node to move to on continue. On a menu it is used only when every choice is hidden. A router never follows it." },
+        "random": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/branch" },
+          "description": "Makes the node a router: it shows nothing and enters one branch, picked by weight."
+        },
+        "on_enter": { "type": "array", "items": { "$ref": "#/$defs/action" }, "description": "Actions run, in order, every time the node is entered." },
+        "speaker": { "$ref": "#/$defs/id", "description": "NPC profile id whose name and portrait the box shows. Default: the NPC being talked to." },
+        "portrait": { "$ref": "#/$defs/id", "description": "Texture id of a portrait for this node only." },
+        "animation": { "type": "string", "description": "Animation the speaking NPC plays when the node shows." }
+      },
+      "additionalProperties": false,
+      "if": { "required": ["random"] },
+      "then": { "not": { "anyOf": [{ "required": ["text"] }, { "required": ["choices"] }] } },
+      "else": { "required": ["text"] }
+    },
+
+    "branch": {
+      "type": "object",
+      "properties": {
+        "node": { "type": "string", "description": "A node of the same graph." },
+        "weight": { "type": "integer", "minimum": 1, "maximum": 2147483647, "description": "Chance is this weight over the total of the router's weights." }
+      },
+      "required": ["node", "weight"],
+      "additionalProperties": false
+    },
+
+    "choice": {
+      "type": "object",
+      "properties": {
+        "text": { "$ref": "#/$defs/text", "description": "What the choice says. A choice needs text or provider." },
+        "provider": { "$ref": "#/$defs/provider" },
+        "next": { "type": "string", "description": "Node to move to after the actions. Without it, and with no action that moved or ended the conversation, the conversation ends." },
+        "only_if": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "description": "Conditions that must all be true for the choice to be available." },
+        "when_unavailable": { "enum": ["hidden", "grayed_out"], "default": "hidden" },
+        "unavailable_message": { "$ref": "#/$defs/text", "description": "Shown when the player hovers a grayed-out choice." },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/action" }, "description": "Actions run, in order, when the player picks the choice." }
+      },
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["text"] }, { "required": ["provider"] }]
+    },
+
+    "provider": {
+      "description": "A choice provider registered by another mod: {\"type\": \"<id>\", ...arguments}. Haruhi registers none.",
+      "type": "object",
+      "properties": { "type": { "$ref": "#/$defs/id" } },
+      "required": ["type"]
+    },
+
+    "condition": {
+      "description": "A condition: {\"type\": \"<id>\", ...arguments}. Types outside the haruhi namespace come from other mods and are not checked here.",
+      "type": "object",
+      "properties": { "type": { "$ref": "#/$defs/id" } },
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "pattern": "^haruhi:" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "haruhi:all_of", "haruhi:any_of", "haruhi:not", "haruhi:flag", "haruhi:visits", "haruhi:predicate",
+                  "haruhi:has_item", "haruhi:advancement", "haruhi:tag", "haruhi:permission", "haruhi:time", "haruhi:weather"
+                ]
+              }
+            }
+          }
+        },
+        { "if": { "properties": { "type": { "const": "haruhi:all_of" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.all_of" } },
+        { "if": { "properties": { "type": { "const": "haruhi:any_of" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.any_of" } },
+        { "if": { "properties": { "type": { "const": "haruhi:not" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.not" } },
+        { "if": { "properties": { "type": { "const": "haruhi:flag" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.flag" } },
+        { "if": { "properties": { "type": { "const": "haruhi:visits" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.visits" } },
+        { "if": { "properties": { "type": { "const": "haruhi:predicate" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.predicate" } },
+        { "if": { "properties": { "type": { "const": "haruhi:has_item" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.has_item" } },
+        { "if": { "properties": { "type": { "const": "haruhi:advancement" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.advancement" } },
+        { "if": { "properties": { "type": { "const": "haruhi:tag" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.tag" } },
+        { "if": { "properties": { "type": { "const": "haruhi:permission" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.permission" } },
+        { "if": { "properties": { "type": { "const": "haruhi:time" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.time" } },
+        { "if": { "properties": { "type": { "const": "haruhi:weather" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/condition.weather" } }
+      ]
+    },
+
+    "condition.all_of": {
+      "description": "True when every condition is true.",
+      "properties": {
+        "type": true,
+        "conditions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } }
+      },
+      "required": ["conditions"],
+      "additionalProperties": false
+    },
+    "condition.any_of": {
+      "description": "True when at least one condition is true.",
+      "properties": {
+        "type": true,
+        "conditions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } }
+      },
+      "required": ["conditions"],
+      "additionalProperties": false
+    },
+    "condition.not": {
+      "description": "True when the condition is false.",
+      "properties": {
+        "type": true,
+        "condition": { "$ref": "#/$defs/condition" }
+      },
+      "required": ["condition"],
+      "additionalProperties": false
+    },
+    "condition.flag": {
+      "description": "Tests a declared flag. set: the value is not 0. unset: it is 0. The other ops compare the value (0 when unset) with value.",
+      "properties": {
+        "type": true,
+        "namespace": { "$ref": "#/$defs/nonEmptyString" },
+        "flag": { "$ref": "#/$defs/nonEmptyString" },
+        "op": { "enum": ["set", "unset", "eq", "ne", "gt", "gte", "lt", "lte"] },
+        "value": { "$ref": "#/$defs/int" }
+      },
+      "required": ["namespace", "flag", "op"],
+      "additionalProperties": false,
+      "if": { "properties": { "op": { "enum": ["set", "unset"] } }, "required": ["op"] },
+      "then": { "not": { "required": ["value"] } },
+      "else": { "required": ["value"] }
+    },
+    "condition.visits": {
+      "description": "Compares how many times this character has opened this graph with this NPC profile, counting the current conversation.",
+      "properties": {
+        "type": true,
+        "op": { "enum": ["eq", "ne", "gt", "gte", "lt", "lte"] },
+        "value": { "$ref": "#/$defs/int" }
+      },
+      "required": ["op", "value"],
+      "additionalProperties": false
+    },
+    "condition.predicate": {
+      "description": "Tests a predicate from the server's data packs on the player, at the player's position.",
+      "properties": {
+        "type": true,
+        "predicate": { "$ref": "#/$defs/id" }
+      },
+      "required": ["predicate"],
+      "additionalProperties": false
+    },
+    "condition.has_item": {
+      "description": "True when the player's inventory holds at least count matching items in total.",
+      "properties": {
+        "type": true,
+        "item": {
+          "description": "An item id, or # and an item tag id.",
+          "type": "string",
+          "pattern": "^#?(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+$"
+        },
+        "count": { "type": "integer", "minimum": 1, "maximum": 2147483647, "default": 1 }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "condition.advancement": {
+      "description": "True when the player has completed the advancement, or the named criterion of it.",
+      "properties": {
+        "type": true,
+        "advancement": { "$ref": "#/$defs/id" },
+        "criterion": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "required": ["advancement"],
+      "additionalProperties": false
+    },
+    "condition.tag": {
+      "description": "True when the player has the scoreboard tag.",
+      "properties": {
+        "type": true,
+        "tag": { "type": "string", "pattern": "^\\S+$" }
+      },
+      "required": ["tag"],
+      "additionalProperties": false
+    },
+    "condition.permission": {
+      "description": "True when the player has at least this operator permission level.",
+      "properties": {
+        "type": true,
+        "level": { "type": "integer", "minimum": 0, "maximum": 4 }
+      },
+      "required": ["level"],
+      "additionalProperties": false
+    },
+    "condition.time": {
+      "description": "True when the time of day is from from to to, both included. The range wraps past midnight when from is above to.",
+      "properties": {
+        "type": true,
+        "from": { "type": "integer", "minimum": 0, "maximum": 23999 },
+        "to": { "type": "integer", "minimum": 0, "maximum": 23999 }
+      },
+      "required": ["from", "to"],
+      "additionalProperties": false
+    },
+    "condition.weather": {
+      "description": "Tests the weather in the player's dimension.",
+      "properties": {
+        "type": true,
+        "weather": { "enum": ["clear", "rain", "thunder"] }
+      },
+      "required": ["weather"],
+      "additionalProperties": false
+    },
+
+    "action": {
+      "description": "An action: {\"type\": \"<id>\", ...arguments}. Types outside the haruhi namespace come from other mods and are not checked here.",
+      "type": "object",
+      "properties": { "type": { "$ref": "#/$defs/id" } },
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "pattern": "^haruhi:" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "haruhi:flag/set", "haruhi:flag/add", "haruhi:flag/clear", "haruhi:goto", "haruhi:end", "haruhi:open",
+                  "haruhi:animation", "haruhi:sound", "haruhi:message", "haruhi:give", "haruhi:command"
+                ]
+              }
+            }
+          }
+        },
+        { "if": { "properties": { "type": { "const": "haruhi:flag/set" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.flag_set" } },
+        { "if": { "properties": { "type": { "const": "haruhi:flag/add" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.flag_add" } },
+        { "if": { "properties": { "type": { "const": "haruhi:flag/clear" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.flag_clear" } },
+        { "if": { "properties": { "type": { "const": "haruhi:goto" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.goto" } },
+        { "if": { "properties": { "type": { "const": "haruhi:end" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.end" } },
+        { "if": { "properties": { "type": { "const": "haruhi:open" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.open" } },
+        { "if": { "properties": { "type": { "const": "haruhi:animation" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.animation" } },
+        { "if": { "properties": { "type": { "const": "haruhi:sound" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.sound" } },
+        { "if": { "properties": { "type": { "const": "haruhi:message" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.message" } },
+        { "if": { "properties": { "type": { "const": "haruhi:give" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.give" } },
+        { "if": { "properties": { "type": { "const": "haruhi:command" } }, "required": ["type"] }, "then": { "$ref": "#/$defs/action.command" } }
+      ]
+    },
+
+    "action.flag_set": {
+      "description": "Sets a declared flag to value.",
+      "properties": {
+        "type": true,
+        "namespace": { "$ref": "#/$defs/nonEmptyString" },
+        "flag": { "$ref": "#/$defs/nonEmptyString" },
+        "value": { "$ref": "#/$defs/int", "default": 1 }
+      },
+      "required": ["namespace", "flag"],
+      "additionalProperties": false
+    },
+    "action.flag_add": {
+      "description": "Adds delta to a declared flag (0 when unset). A negative delta subtracts.",
+      "properties": {
+        "type": true,
+        "namespace": { "$ref": "#/$defs/nonEmptyString" },
+        "flag": { "$ref": "#/$defs/nonEmptyString" },
+        "delta": { "$ref": "#/$defs/int", "default": 1 }
+      },
+      "required": ["namespace", "flag"],
+      "additionalProperties": false
+    },
+    "action.flag_clear": {
+      "description": "Clears a declared flag, so it reads 0.",
+      "properties": {
+        "type": true,
+        "namespace": { "$ref": "#/$defs/nonEmptyString" },
+        "flag": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "required": ["namespace", "flag"],
+      "additionalProperties": false
+    },
+    "action.goto": {
+      "description": "After the current actions, enters a node of the same graph.",
+      "properties": {
+        "type": true,
+        "node": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "required": ["node"],
+      "additionalProperties": false
+    },
+    "action.end": {
+      "description": "After the current actions, ends the conversation.",
+      "properties": { "type": true },
+      "additionalProperties": false
+    },
+    "action.open": {
+      "description": "After the current actions, ends this conversation and opens a graph of the same bundle with the same NPC.",
+      "properties": {
+        "type": true,
+        "graph": { "$ref": "#/$defs/id" }
+      },
+      "required": ["graph"],
+      "additionalProperties": false
+    },
+    "action.animation": {
+      "description": "The NPC being talked to plays the animation.",
+      "properties": {
+        "type": true,
+        "animation": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "required": ["animation"],
+      "additionalProperties": false
+    },
+    "action.sound": {
+      "description": "Plays a sound event at the player's position, in the master category.",
+      "properties": {
+        "type": true,
+        "sound": { "$ref": "#/$defs/id" },
+        "volume": { "type": "number", "minimum": 0, "default": 1 },
+        "pitch": { "type": "number", "exclusiveMinimum": 0, "default": 1 }
+      },
+      "required": ["sound"],
+      "additionalProperties": false
+    },
+    "action.message": {
+      "description": "Sends the text to the player's chat.",
+      "properties": {
+        "type": true,
+        "text": { "$ref": "#/$defs/text" }
+      },
+      "required": ["text"],
+      "additionalProperties": false
+    },
+    "action.give": {
+      "description": "Gives a loot table's items once per character. Refuses when the once flag is set; otherwise writes the flag to storage before handing anything over.",
+      "properties": {
+        "type": true,
+        "loot_table": { "$ref": "#/$defs/id" },
+        "once": {
+          "type": "object",
+          "properties": {
+            "namespace": { "$ref": "#/$defs/nonEmptyString" },
+            "flag": { "$ref": "#/$defs/nonEmptyString" }
+          },
+          "required": ["namespace", "flag"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["loot_table", "once"],
+      "additionalProperties": false
+    },
+    "action.command": {
+      "description": "Runs a command as the player, at the permission level in config/haruhi-dialogue.json. The first word must be on that file's allowlist, which is empty by default.",
+      "properties": {
+        "type": true,
+        "command": { "type": "string", "pattern": "[^\\s/]" }
+      },
+      "required": ["command"],
+      "additionalProperties": false
+    }
+  }
+}

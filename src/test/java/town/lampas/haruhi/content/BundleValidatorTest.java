@@ -22,6 +22,7 @@ import town.lampas.haruhi.content.model.DialogueChoice;
 import town.lampas.haruhi.content.model.DialogueGraph;
 import town.lampas.haruhi.content.model.DialogueNode;
 import town.lampas.haruhi.content.model.NpcProfile;
+import town.lampas.haruhi.dialogue.api.DialogueRegistries;
 
 import static town.lampas.haruhi.content.ContentTestSupport.GRAPH;
 import static town.lampas.haruhi.content.ContentTestSupport.NPC;
@@ -586,8 +587,7 @@ class BundleValidatorTest {
         node(bundle, "hello").getAsJsonArray("on_enter")
                 .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:nowhere\"}"));
         List<String> lines = problems(validate(bundle));
-        assertTrue(lines.contains(GRAPH + "#hello: open graph 'haruhi_test:nowhere' is not a dialogue in this bundle"),
-                lines::toString);
+        assertTrue(lines.contains(missingOpenGraph(GRAPH + "#hello: ")), lines::toString);
     }
 
     @Test
@@ -596,9 +596,20 @@ class BundleValidatorTest {
         node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonArray("actions")
                 .add(JsonParser.parseString("{\"type\":\"haruhi:open\",\"graph\":\"haruhi_test:nowhere\"}"));
         List<String> lines = problems(validate(bundle));
-        assertTrue(lines.contains(
-                        GRAPH + "#hello, choice 1: open graph 'haruhi_test:nowhere' is not a dialogue in this bundle"),
-                lines::toString);
+        assertTrue(lines.contains(missingOpenGraph(GRAPH + "#hello, choice 1: ")), lines::toString);
+    }
+
+    /**
+     * The problem for a {@code haruhi:open} of {@code haruhi_test:nowhere}. The reader checks the graph itself only
+     * while the built-in is not registered; once a dialogue test in this JVM has registered the built-ins, the built-in's
+     * parser reports it, at the node without the choice number. Test classes run in no fixed order (Gradle runs
+     * classes that failed last time first), so either can apply.
+     */
+    private static String missingOpenGraph(String readerWhere) {
+        if (DialogueRegistries.action(id("haruhi:open")).isPresent()) {
+            return GRAPH + "#hello: haruhi:open: graph 'haruhi_test:nowhere' is not in this bundle";
+        }
+        return readerWhere + "open graph 'haruhi_test:nowhere' is not a dialogue in this bundle";
     }
 
     @Test

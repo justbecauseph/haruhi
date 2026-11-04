@@ -1,9 +1,6 @@
 # Models and animations
 
-This page is for model makers. With it you can give an NPC its own Blockbench model, texture, animations and
-dialogue portrait, convert a `.bbmodel` file into the files Haruhi loads, ship them in a resource pack or a mod, and
-check that the result looks right in game: standing on the ground, facing the right way, framed in the dialogue
-headshot, with its name tag just above its head.
+For model makers who give an NPC its own Blockbench model, texture, animations and dialogue portrait.
 
 Related pages: [README](../README.md), [content guide](content-guide.md) (NPC profiles and dialogue),
 [server guide](server-guide.md), [developer guide](developer-guide.md).
@@ -29,7 +26,7 @@ to each client, so the server never needs GeckoLib or the asset files. What a pl
 | Haruhi and GeckoLib | Through GeckoLib's replaced-entity renderer: the profile's `model`, `texture` and `animations`, scaled by `scale`. |
 | Haruhi without GeckoLib | As the vanilla player model with wide arms, using the profile's `texture` as its skin and `scale` as its size. `model` and `animations` are ignored, and none of Haruhi's animations play. |
 
-`fabric.mod.json` lists GeckoLib 5.5.5 or later as recommended, not required, so Haruhi runs without it.
+`fabric.mod.json` lists GeckoLib 5.5.5 or later under `recommends`, so Haruhi runs without it.
 
 The server sends each NPC's look (model, texture and animations ids) with the entity, and its name and scale through
 the vanilla custom name and scale attribute. Activating a new content revision updates every loaded NPC at once.
@@ -96,11 +93,10 @@ a value below 0.0625 acts as 0.0625, the smallest value Minecraft's scale attrib
 
 ### Shipping the files
 
-The files can come from any resource pack the client has loaded:
-
-- **A resource pack**: put the `assets/` tree in a pack folder or zip next to a `pack.mcmeta`, and enable it on the
-  client (or have the server send it). The converter does not write `pack.mcmeta`.
-- **A mod**: put the `assets/` tree in the mod's resources. Haruhi ships `haruhi:humanoid` this way.
+The files can come from any resource pack the client has loaded. For a resource pack, put the `assets/` tree in a pack
+folder or zip next to a `pack.mcmeta`, and enable it on the client (or have the server send it); the converter does
+not write `pack.mcmeta`. For a mod, put the `assets/` tree in the mod's resources, which is how Haruhi ships
+`haruhi:humanoid`.
 
 Only players who have the files see the model; everyone else sees the fallbacks below. After editing the files, a
 resource reload (F3+T) makes GeckoLib bake them again.
@@ -124,11 +120,10 @@ resource pack has the file.
 
 ## Animations
 
-Each NPC runs two GeckoLib animation controllers:
-
-- **The base controller** loops `idle`, or `talk` while the player's dialogue screen shows a node that this NPC
-  speaks. Both loop whatever the file says. Only the talking player's client sees `talk`; everyone else sees `idle`.
-- **The actions controller** plays a clip when something triggers it by name, on top of the base.
+Each NPC runs two GeckoLib animation controllers. The base controller loops `idle`, or `talk` while the player's
+dialogue screen shows a node that this NPC speaks. Both loop whatever the file says. Only the talking player's client
+sees `talk`; everyone else sees `idle`. The actions controller plays a clip on top of the base when something triggers
+it by name.
 
 Two things trigger a clip:
 
@@ -137,12 +132,10 @@ Two things trigger a clip:
 | A node's `animation` field | The talking player only | When the node arrives on their screen, if the node's speaker is the NPC they are talking to. |
 | The `haruhi:animation` action | Every player whose client tracks the NPC and has Haruhi and GeckoLib | When the action runs, on the NPC being talked to. |
 
-A triggered clip keeps one loop mode from its file:
-
-- **`hold_on_last_frame`** (the `hold` loop mode in a `.bbmodel`) plays and then holds its last frame until another
-  clip is triggered. Use it for a pose that should stay, such as glasses taken off.
-- **Anything else** (loop, play once, or no loop key) plays once, and the base animation takes over again when it
-  ends. A clip that loops in its file still plays once when triggered.
+A triggered clip keeps one loop mode from its file. A clip set to `hold_on_last_frame` (the `hold` loop mode in a
+`.bbmodel`) plays and then holds its last frame until another clip is triggered; use it for a pose that should stay,
+such as glasses taken off. Any other clip (loop, play once, or no loop key) plays once, and the base animation takes
+over again when it ends. A clip that loops in its file still plays once when triggered.
 
 The names that can be triggered are the clips in the NPC's animations file plus the default humanoid's (`idle`,
 `talk`, `wave`); the NPC's own clip wins when both have a name. Any other name does nothing, and nothing checks
@@ -167,14 +160,14 @@ The 3D render turns the body 25 degrees so the face looks toward the text, and t
 degrees. It is framed on the model's head:
 
 - The head is the first bone named `head` in any case (`head`, `Head`), searched depth first from the top-level bones.
-- The frame is fitted to the head bone's **own** cubes in the rest pose, with a little room above, room below for the
-  top of the shoulders, and a little at the sides. Cubes in bones under the head (hair, ears, antennae, a hat layer, a
+- The frame is fitted to the head bone's own cubes in the rest pose, with a little room above, room below for the top
+  of the shoulders, and a little at the sides. Cubes in bones under the head (hair, ears, antennae, a hat layer, a
   snout) are left out so they cannot shrink the face to a corner of the frame.
 - Only when the head bone has no cubes of its own is the frame fitted to the cubes of every bone under it.
 - A model without a head bone, and every NPC on a client without GeckoLib, is framed on the top 30% of its hitbox.
 - The frame is measured in the rest pose, so `idle` and `talk` move the head a little inside it.
 
-So: name the bone that holds the skull `head`, keep the skull cubes in that bone, and put hair, hats and ears in child
+Name the bone that holds the skull `head`, keep the skull cubes in that bone, and put hair, hats and ears in child
 bones. In the default humanoid, the frame fits the 8x8x8 `head` cube without the `hat` layer.
 
 ## Name tag placement
@@ -252,39 +245,39 @@ are grouped, with up to eight of the elements or animations they concern listed 
 
 The rules follow Blockbench's own Bedrock export, which is what GeckoLib reads.
 
-- **Bones** are the outliner's groups. Elements at the root go into a first bone named `bb_main`. Bone names keep only
+- Bones are the outliner's groups. Elements at the root go into a first bone named `bb_main`. Bone names keep only
   `A-Z a-z 0-9 _ . -` and must be unique ignoring case; a duplicate gets the first free number from 2 in place of
   any trailing digits (from 1 when the name ends in a single 0), and the first bone keeps its name. Each change is a
   warning, and animations follow the renamed bones. Groups set not to export are skipped unless something inside them
   exports.
-- **Cubes** keep their origin, size, pivot, rotation and inflate, with X mirrored as Blockbench does. Cubes set not to
+- Cubes keep their origin, size, pivot, rotation and inflate, with X mirrored as Blockbench does. Cubes set not to
   export are skipped.
-- **Box UV** cubes stay box UV when GeckoLib can draw them as Blockbench does, with their UV offset and mirroring. A
-  box UV cube with a face that is not drawn, faces on different textures, or a texture that is scaled in the atlas is
+- Box UV cubes stay box UV when GeckoLib can draw them as Blockbench does, with their UV offset and mirroring. A box
+  UV cube with a face that is not drawn, faces on different textures, or a texture that is scaled in the atlas is
   written with per-face UVs instead, with a warning; so is one with a fractional size in the `modded_entity` format.
   In other formats a fractional size stays box UV, laid out from the size rounded down, as Blockbench draws it.
-- **Per-face UV** is written face by face, with Blockbench's flip of the up and down faces, and UV rotation.
-- **Faces** whose texture is set to none are not drawn. A face with no texture assigned is drawn with the default
-  texture (the first one, or in `bedrock_block` the one set as default), with a warning outside the single-texture
-  formats listed below.
-- **Formats with the origin at a block corner** (`java_block`, `image`) are moved by -8 in X and Z, with a warning, as
-  Blockbench does when converting to an entity format.
+- Per-face UV is written face by face, with Blockbench's flip of the up and down faces, and UV rotation.
+- Faces whose texture is set to none are not drawn. A face with no texture assigned is drawn with the default texture
+  (the first one, or in `bedrock_block` the one set as default), with a warning outside the single-texture formats
+  listed below.
+- Projects in the formats with the origin at a block corner (`java_block`, `image`) are moved by -8 in X and Z, with
+  a warning, as Blockbench does when converting to an entity format.
 
 ### Textures and atlases
 
 GeckoLib draws a model with one texture. Face UVs in a project are in their texture's UV size: the texture's own UV
 width and height in formats that have one, else the project resolution.
 
-- **One used texture** is copied as it is, and the model keeps its UV size as `texture_width` and `texture_height`.
-  The image may have more pixels than the UV size. If the UV size is not whole, UVs are mapped to the image's pixels
-  instead, with a warning.
-- **Several used textures** are packed into one atlas image, and every face's UV is moved and scaled into it. A face
-  whose UV reaches outside its own texture is a warning, because in the atlas it shows part of a neighbour.
-- **Unused textures** are left out and listed as ignored.
-- **Animated textures**: in the formats that animate textures (`free`, `java_block`, `bedrock`, `bedrock_block`,
-  `bedrock_old`, `image`) only the first frame is kept, with a warning. Other formats keep the whole image.
-- **Render modes** other than the default (such as emissive) are not carried over; the texture draws as an ordinary
-  one, with a warning.
+- When one texture is used, it is copied as it is, and the model keeps its UV size as `texture_width` and
+  `texture_height`. The image may have more pixels than the UV size. If the UV size is not whole, UVs are mapped to
+  the image's pixels instead, with a warning.
+- When several textures are used, they are packed into one atlas image, and every face's UV is moved and scaled into
+  it. A face whose UV reaches outside its own texture is a warning, because in the atlas it shows part of a neighbour.
+- Unused textures are left out and listed as ignored.
+- In the formats that animate textures (`free`, `java_block`, `bedrock`, `bedrock_block`, `bedrock_old`, `image`), an
+  animated texture keeps only its first frame, with a warning. Other formats keep the whole image.
+- Render modes other than the default (such as emissive) are not carried over; the texture draws as an ordinary one,
+  with a warning.
 - In the single-texture formats (`bedrock`, `bedrock_old`, `image`, `modded_entity`, `skin`) every drawn face uses the
   first texture, as in Blockbench.
 
@@ -331,9 +324,10 @@ that breaks the rules in the argument table.
 
 ## From .bbmodel to a spawned NPC
 
-1. **Build the model in Blockbench.** Feet at y 0, front facing north, the skull in a bone named `head`, and clips named
-   `idle` and `talk` (see [Tips](#tips)). Save the project uncompressed, for example as `C:/art/mira.bbmodel`.
-2. **Convert it into a resource pack folder:**
+1. Build the model in Blockbench with its feet at y 0, its front facing north, the skull in a bone named `head`, and
+   clips named `idle` and `talk` (see [Tips](#tips)). Save the project uncompressed, for example as
+   `C:/art/mira.bbmodel`.
+2. Convert it into a resource pack folder:
 
    ```
    ./gradlew bbmodel --args='C:/art/mira.bbmodel C:/packs/shop-npcs shop mira'
@@ -342,9 +336,9 @@ that breaks the rules in the argument table.
    This writes `C:/packs/shop-npcs/assets/shop/geckolib/models/mira.geo.json`,
    `.../geckolib/animations/mira.animation.json` and `.../textures/entity/mira.png`. Fix what the warnings report and
    convert again until they are what you expect.
-3. **Make it a pack.** Add a `pack.mcmeta` to `C:/packs/shop-npcs`, copy the folder into the client's
-   `resourcepacks/` folder and enable it, or have the server send it as its resource pack.
-4. **Point a profile at it.** Paste the printed fields into the NPC's profile in the content bundle:
+3. Add a `pack.mcmeta` to `C:/packs/shop-npcs`, copy the folder into the client's `resourcepacks/` folder and enable
+   it, or have the server send it as its resource pack.
+4. Paste the printed fields into the NPC's profile in the content bundle:
 
    ```json
    "shop:mira": {
@@ -356,32 +350,31 @@ that breaks the rules in the argument table.
    }
    ```
 
-5. **Put the content live** with `/haruhi content validate`, `import` and `activate`, as the [content
+5. Put the content live with `/haruhi content validate`, `import` and `activate`, as the [content
    guide](content-guide.md#workflow) describes. NPCs already standing with that profile change look at once.
-6. **Spawn it:** `/haruhi npc spawn shop:mira ^ ^ ^3` places it three blocks in front of you, facing you.
-7. **Check it.** Walk around it and right-click it: its feet should touch the ground, its face should point at you,
-   the name tag should sit just above its head, the headshot should frame its face, and `talk` should play while it
-   speaks. After changing the model, convert again and press F3+T.
+6. `/haruhi npc spawn shop:mira ^ ^ ^3` places the NPC three blocks in front of you, facing you.
+7. Walk around it and right-click it. Its feet should touch the ground, its face should point at you, the name tag
+   should sit just above its head, the headshot should frame its face, and `talk` should play while it speaks. After
+   changing the model, convert again and press F3+T.
 
 ## Tips
 
-- **Put the feet at y 0.** The entity's position is the model's origin, so cubes below 0 sink into the ground and a
-  model built higher floats.
-- **Face north (-Z).** That side of the model is its front in game. In the default humanoid the face texture is on
-  the head cube's north face.
-- **Name the skull bone `head`** and keep only the skull's cubes in it. Hair, hats, ears and horns go in child bones so
-  the headshot frames the face.
-- **Mind the hitbox.** Players click the 0.6 x 1.8 block box (times `scale`) to talk. If the model is much taller,
-  wider or smaller than that, adjust the model or `scale` so the box covers the body.
-- **Give the model its own `idle` and `talk` clips.** Without them it falls back to the humanoid's, which only move
-  bones with the humanoid's names.
-- **Give a pose clip the `hold` loop mode** when it should stay after it plays; any other clip plays once when
-  triggered.
-- **Keep the texture's proportions** equal to its UV size (64x64 UV wants a square image). With one texture, a
+- Put the feet at y 0. The entity's position is the model's origin, so cubes below 0 sink into the ground and a model
+  built higher floats.
+- Face the model north (-Z), which is its front in game. In the default humanoid the face texture is on the head
+  cube's north face.
+- Name the skull bone `head` and keep only the skull's cubes in it. Hair, hats, ears and horns go in child bones so the
+  headshot frames the face.
+- Players click the 0.6 x 1.8 block hitbox (times `scale`) to talk. If the model is much taller, wider or smaller than
+  that, adjust the model or `scale` so the box covers the body.
+- Give the model its own `idle` and `talk` clips. Without them it falls back to the humanoid's, which only move bones
+  with the humanoid's names.
+- Give a pose clip the `hold` loop mode when it should stay after it plays; any other clip plays once when triggered.
+- Keep the texture's proportions equal to its UV size (64x64 UV wants a square image). With one texture, a
   higher-resolution image of the same proportions works, because the model keeps its UV size.
-- **Give box UV cubes whole-number sizes.** Box UV lays the texture out from the size rounded down, and in the
+- Give box UV cubes whole-number sizes. Box UV lays the texture out from the size rounded down, and in the
   `modded_entity` format a fractional size makes the converter write the cube per face.
-- **Make portraits square.** They are stretched to the square frame.
+- Make portraits square, because they are stretched to the square frame.
 
 ## Limitations
 

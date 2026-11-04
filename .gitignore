@@ -19,6 +19,7 @@ bin/
 .classpath
 .project
 *.launch
+.serena
 
 # os
 *.DS_Store

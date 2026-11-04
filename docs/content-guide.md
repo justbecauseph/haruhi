@@ -1,8 +1,6 @@
 # Writing NPCs and conversations
 
-This page is for content writers. With it you can write a content bundle (one JSON file that defines NPC profiles,
-dialogue graphs and dialogue flags), check it with `/haruhi content validate`, put it live, spawn the NPCs and talk to
-them. It ends with a complete example bundle and a description of the dialogue screen as a player sees it.
+For content writers. A content bundle is one JSON file that defines NPC profiles, dialogue graphs and dialogue flags.
 
 Related pages: [README](../README.md), [server guide](server-guide.md) (installing, storage, configuration),
 [models and animations](models-and-animations.md) (how NPCs look and move), [developer guide](developer-guide.md)
@@ -82,19 +80,41 @@ A bundle is one JSON object:
 
 Rules that apply everywhere in the file:
 
-- **Strict JSON.** Comments, trailing commas and unquoted keys are syntax errors.
-- **Ids** are `namespace:path`. The namespace uses `a-z 0-9 _ . -`, the path the same plus `/`. An id without a colon
+- The file is strict JSON: comments, trailing commas and unquoted keys are syntax errors.
+- Ids are `namespace:path`. The namespace uses `a-z 0-9 _ . -`, the path the same plus `/`. An id without a colon
   gets the `minecraft` namespace, so write the namespace every time. NPC, graph and flag namespace keys are ids.
-- **Node ids** are plain strings and only need to be unique inside their graph.
-- **Text** fields take Minecraft's text component JSON: a plain string such as `"Hello."`, or a component object such as
+- Node ids are plain strings and only need to be unique inside their graph.
+- Text fields take Minecraft's text component JSON: a plain string such as `"Hello."`, or a component object such as
   `{"text": "Hello.", "color": "gold"}`.
-- **Keys are snake_case**, and an unknown key is an error at every level: bundle, NPC, graph, node, choice, router
-  branch and the arguments of every condition and action. A misspelt `only_if` fails validation instead of silently
-  removing a gate.
-- **Duplicate ids are errors.** Two keys in one section that parse to the same id, such as `guard` and
-  `minecraft:guard`, are refused.
-- **Exact duplicate keys are not detected.** The JSON parser keeps the last of two identical keys in one object (two
+- Keys are snake_case, and an unknown key is an error at every level: bundle, NPC, graph, node, choice, router branch
+  and the arguments of every condition and action. A misspelt `only_if` fails validation instead of silently removing
+  a gate.
+- Two keys in one section that parse to the same id, such as `guard` and `minecraft:guard`, are an error.
+- Exact duplicate keys are not detected. The JSON parser keeps the last of two identical keys in one object (two
   `"text"` keys in a node, or the same NPC key twice), and validation sees only that one.
+
+### Checking a bundle in an editor
+
+[`bundle.schema.json`](bundle.schema.json) is a JSON Schema (draft 2020-12) of this format and of the built-in
+conditions and actions. An editor that reads JSON Schema uses it to complete keys and to mark unknown keys, missing
+fields, wrong types and bad built-in arguments as you type. It does not replace `/haruhi content validate`, which also
+checks references between nodes, graphs and NPCs, reachability, flag declarations, types registered by other mods and
+the command allowlist.
+
+A bundle cannot name its schema with a `$schema` key, because validation refuses unknown keys. Map the schema to the
+bundle files in the editor's settings instead. In VS Code, copy `bundle.schema.json` to the root of the folder you
+open, and add this to that folder's `.vscode/settings.json`:
+
+```json
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["**/config/haruhi/bundles/**/*.json", "**/config/haruhi/bundle.json"],
+      "url": "./bundle.schema.json"
+    }
+  ]
+}
+```
 
 ## NPC profiles
 
@@ -201,9 +221,8 @@ conversation never follows it and the reachability check does not count it.
 
 A provider expands into any number of choices, generated each time the node is shown. Its choices bring their own
 text, action and target node, and can be grayed out with a reason; the choice's own `text`, `next` and `actions` are
-not used. Its `only_if` still decides
-whether the provider runs. Haruhi registers no providers itself; other mods can (see the [developer
-guide](developer-guide.md)). A bundle that names an unregistered provider fails validation.
+not used. Its `only_if` still decides whether the provider runs. Haruhi registers no providers itself; other mods can
+(see the [developer guide](developer-guide.md)). A bundle that names an unregistered provider fails validation.
 
 ### Conditions and actions
 
@@ -247,23 +266,22 @@ flowchart TD
     input -- "Escape or Cancel" --> ended
 ```
 
-Step by step:
+Entering a node runs its `on_enter` actions in order. `haruhi:goto`, `haruhi:end` and `haruhi:open` take effect after
+all of that node's actions have run, and when several are called the last one wins. A node left this way is never
+shown. Choices are worked out after `on_enter`, so a flag set in `on_enter` already counts for the node's own choices.
+A router picks one branch and enters it.
 
-- **Entering a node** runs its `on_enter` actions in order. `haruhi:goto`, `haruhi:end` and `haruhi:open` take effect
-  after all of that node's actions have run, and when several are called the last one wins. A node left this way is
-  never shown. Choices are worked out after `on_enter`, so a flag set in `on_enter` already counts for the node's own
-  choices.
-- **A router** picks one branch and enters it.
-- **Showing a node** sends the text, the speaker and the visible choices to the player. Hidden choices are left out;
-  grayed-out choices are listed but cannot be picked.
-- **Picking a choice.** The server works the node's choices out again. If the picked choice is no longer available, or
-  the choice at its place in the list is not the one that was shown, the node is shown again and nothing runs.
-  Otherwise the choice's actions run and the conversation moves to the node an action named, or to the choice's
-  `next`, or ends.
-- **Continuing** a node with no visible choices moves to its `next`, or ends the conversation. A menu whose choices
-  are all hidden at that moment behaves like a line.
-- A menu whose visible choices are all grayed out cannot be continued; the player can only leave with Escape. Give
-  every menu at least one choice that is always available.
+Showing a node sends the text, the speaker and the visible choices to the player. Hidden choices are left out;
+grayed-out choices are listed but cannot be picked.
+
+When the player picks a choice, the server works the node's choices out again. If the picked choice is no longer
+available, or the choice at its place in the list is not the one that was shown, the node is shown again and nothing
+runs. Otherwise the choice's actions run and the conversation moves to the node an action named, or to the choice's
+`next`, or ends.
+
+Continuing a node with no visible choices moves to its `next`, or ends the conversation. A menu whose choices are all
+hidden at that moment behaves like a line. A menu whose visible choices are all grayed out cannot be continued, and
+the player can only leave with Escape, so give every menu at least one choice that is always available.
 
 A conversation also ends when:
 
@@ -394,8 +412,8 @@ can run `clear @s minecraft:emerald 5`.
 `/haruhi content validate <file>`, `import`, `activate` and the server start all run the same full check. Run
 `validate` after every edit: it reports every problem in the file in one pass, and changes nothing. A JSON syntax error
 is the exception: the check stops at the first one. Activation checks the stored revision again, so a revision that no
-longer validates on this server (for example after an allowlist change) is refused. At server start, a live revision that fails validation leaves the server with no content, and the
-log lists every problem.
+longer validates on this server (for example after an allowlist change) is refused. At server start, a live revision
+that fails validation leaves the server with no content, and the log lists every problem.
 
 What is checked:
 
@@ -448,7 +466,7 @@ messages:
 
 ## Worked example
 
-A shopkeeper, Mira, and a passer-by, Old Tom. Mira's conversation has:
+This bundle has a shopkeeper, Mira, and a passer-by, Old Tom. Mira's conversation has:
 
 - a greeting router (`greet`) that counts the visit in a flag and then picks a warm greeting three times out of four;
 - a choice gated on a flag: "Heard any rumours?" stays hidden until the player has introduced themselves;

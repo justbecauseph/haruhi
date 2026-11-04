@@ -1,11 +1,8 @@
 # Developer guide
 
-This page is for developers who build Haruhi, change it, or extend it from another mod. It describes the modules and
-the order they start in, how one conversation travels between server and client, the network payloads, the API for
-registering condition, action and choice-provider types, what a new storage backend must do, and how to build and test.
-
-Back to the [README](../README.md). Operating a server is in the [server guide](server-guide.md), the bundle format in
-the [content guide](content-guide.md), and the model pipeline in [models and animations](models-and-animations.md).
+For developers who build Haruhi, change it, or extend it from another mod. Back to the [README](../README.md).
+Operating a server is in the [server guide](server-guide.md), the bundle format in the [content
+guide](content-guide.md), and the model pipeline in [models and animations](models-and-animations.md).
 
 - [Architecture](#architecture)
 - [A conversation from click to close](#a-conversation-from-click-to-close)
@@ -162,18 +159,18 @@ sequenceDiagram
 
 What the server checks, and in what order:
 
-1. **Session and node.** A pick counts only when its session id is the player's current session and its node id is the
-   node last sent. Anything else is ignored without a reply. The client stops taking input after a pick until the
-   next node arrives, for at most 2 seconds.
-2. **Distance.** A conversation with an NPC ends when the NPC is dead, in another level, or more than 8 blocks away.
-   The tick handler checks the same every tick.
-3. **The entry.** The runner works out the node's visible entries again, running the conditions and providers. The
-   index must be in range of both the list it sent and the new list, the entry must be enabled, and it must be the
-   same choice, the same provided position and the same text. Otherwise the node is shown again and nothing runs. An
-   index of -1 continues a node that has no visible entries.
-4. **Actions.** The choice's actions run in order. An action that throws ends the conversation and is logged. A
-   `goTo`, `end` or `openGraph` call replaces the choice's `next`; the last call in a batch wins.
-5. **Next node.** Entering a node runs its `on_enter` actions, then follows routers and jumps until a node with text is
+1. A pick counts only when its session id is the player's current session and its node id is the node last sent.
+   Anything else is ignored without a reply. The client stops taking input after a pick until the next node arrives,
+   for at most 2 seconds.
+2. A conversation with an NPC ends when the NPC is dead, in another level, or more than 8 blocks away. The tick
+   handler checks the same every tick.
+3. The runner works out the node's visible entries again, running the conditions and providers. The index must be in
+   range of both the list it sent and the new list, the entry must be enabled, and it must be the same choice, the
+   same provided position and the same text. Otherwise the node is shown again and nothing runs. An index of -1
+   continues a node that has no visible entries.
+4. The choice's actions run in order. An action that throws ends the conversation and is logged. A `goTo`, `end` or
+   `openGraph` call replaces the choice's `next`; the last call in a batch wins.
+5. Entering the next node runs its `on_enter` actions, then follows routers and jumps until a node with text is
    reached. One step may enter at most 64 nodes and chain at most 8 graphs through `haruhi:open`.
 
 The client sends only the session id, the node id and the choice index. Actions never travel to the client.
@@ -417,7 +414,7 @@ when your entrypoint runs, and a getter called too early throws. `DialogueRegist
 
 ## Adding a storage backend
 
-`HaruhiStorage` is the seam for durable state. `StorageModule.build` chooses between the two built-in backends from
+`HaruhiStorage` is the interface for durable state. `StorageModule.build` chooses between the two built-in backends from
 `storage.type`, and there is no hook to plug in a backend from another mod. A new backend is a change to this
 repository:
 
@@ -474,9 +471,12 @@ Minecraft server. `test` depends on `classes` and passes the compiled main class
 - `storage/`: the config parser, `StorageExecutor`, the migration file loader, and `HaruhiStorageContractTest` run
   against `InMemoryStorage` and `PostgresStorage`.
 - `content/`: the validator, digest, bundle files, the startup choice, commands, the content service and the
-  activation order.
+  activation order. `BundleSchemaTest` checks `docs/bundle.schema.json` against the bundle reader: the same keys at
+  every level, the same verdict on a set of malformed bundles, and acceptance of the seed, the GameTest fixtures and
+  every full bundle in `AGENTS.md`, `README.md` and `docs/`.
 - `dialogue/`: the dialogue config, built-in parsing and evaluation, commands, the flag cache and write-behind, the
-  presenters and the graph runner.
+  presenters and the graph runner. `BuiltinSchemaTest` checks that the schema lists exactly the registered `haruhi:`
+  conditions and actions and gives the same verdict as their parsers on a set of argument cases.
 - `npc/`: commands, facing and look syncing.
 - `client/`: the screen's layout, keys, HUD decisions and typewriter, the client config, headshot framing, and the
   GeckoLib renderer.
@@ -485,6 +485,10 @@ Minecraft server. `test` depends on `classes` and passes the compiled main class
 Tests that need a working GeckoLib run their code in a separate class loader (`GeckoLibSandbox`,
 `GeckoLibBakeSandbox`), because GeckoLib's setup registers a data component, which a JVM cannot do once another test has
 frozen the registries.
+
+The two schema tests use networknt `json-schema-validator`, a test-only dependency. They read the schema, the docs and
+the GameTest fixtures from the project directory, and `build.gradle` declares those files as inputs of `test`, so
+editing any of them reruns the tests.
 
 ### PostgreSQL tests and Docker
 

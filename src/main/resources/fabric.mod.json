@@ -10,7 +10,7 @@
   "contact": {
     "sources": "https://github.com/justbecauseph/haruhi"
   },
-  "license": "All-Rights-Reserved",
+  "license": "MPL-2.0",
   "environment": "*",
   "entrypoints": {
     "main": [
