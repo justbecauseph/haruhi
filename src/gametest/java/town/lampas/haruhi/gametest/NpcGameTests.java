@@ -365,27 +365,64 @@ public final class NpcGameTests {
                 .thenSucceed();
     }
 
-    /** A spawned NPC faces the way the command source faces, with its head and body as well as its yaw. */
+    /**
+     * A spawned NPC turns toward the command source, with its head and body as well as its yaw. Each source stands three
+     * blocks from the spawn spot and looks at it, so the NPC faces the opposite way to the source. Minecraft's yaw: 0
+     * faces south (+Z), 90 west (-X), 180 north (-Z), -90 east (+X).
+     */
     @GameTest(environment = ENVIRONMENT, maxTicks = 20)
     public void spawnFacesTheCommandSource(GameTestHelper helper) {
         afterStartupContent(helper)
                 .thenExecute(() -> {
                     activateFixtures();
                     ServerLevel level = helper.getLevel();
-                    Vec3 at = helper.absoluteVec(new Vec3(2.5, 2.0, 2.5));
-                    List<NpcEntity> before = npcsIn(level);
-                    Optional<CommandSyntaxException> failure = runCommand(level, at, 180.0F,
-                            String.format(Locale.ROOT, "haruhi npc spawn %s %.3f %.3f %.3f", GREETER, at.x, at.y, at.z));
-                    helper.assertTrue(failure.isEmpty(),
-                            "the spawn command failed: " + failure.map(e -> e.getMessage()).orElse(""));
+                    Vec3 at = helper.absoluteVec(new Vec3(4.5, 2.0, 4.5));
+                    // {where the source stands, relative to the spawn spot; the source's yaw; the NPC's expected yaw}
+                    Object[][] cases = {
+                            {new Vec3(0.0, 0.0, -3.0), 0.0F, 180.0F, "a source to the north"},
+                            {new Vec3(0.0, 0.0, 3.0), 180.0F, 0.0F, "a source to the south"},
+                            {new Vec3(3.0, 0.0, 0.0), 90.0F, -90.0F, "a source to the east"},
+                            {new Vec3(-3.0, 0.0, 0.0), -90.0F, 90.0F, "a source to the west"},
+                    };
+                    for (Object[] c : cases) {
+                        NpcEntity npc = spawnByCommand(helper, at.add((Vec3) c[0]), (float) c[1],
+                                String.format(Locale.ROOT, "haruhi npc spawn %s %.3f %.3f %.3f",
+                                        GREETER, at.x, at.y, at.z));
+                        assertFacing(helper, npc, (float) c[2], "the NPC spawned by " + c[3]);
+                        npc.discard();
+                    }
+                })
+                .thenSucceed();
+    }
 
-                    List<NpcEntity> added = npcsIn(level);
-                    added.removeAll(before);
-                    helper.assertValueEqual(added.size(), 1, "the spawn command added this many NPCs");
-                    NpcEntity npc = added.get(0);
-                    helper.assertValueEqual(npc.getYRot(), 180.0F, "the spawned NPC's yaw");
-                    helper.assertValueEqual(npc.getYHeadRot(), 180.0F, "the spawned NPC's head yaw");
-                    helper.assertValueEqual(npc.yBodyRot, 180.0F, "the spawned NPC's body yaw");
+    /**
+     * The reported case: a source facing west spawns the NPC three blocks in front of itself with {@code ^ ^ ^3}. The
+     * NPC stands west of the source and faces east, back at it, not west with its back to it.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void spawnInFrontOfTheSourceFacesBackAtIt(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    Vec3 source = helper.absoluteVec(new Vec3(5.5, 2.0, 2.5));
+                    NpcEntity npc = spawnByCommand(helper, source, 90.0F, "haruhi npc spawn " + GREETER + " ^ ^ ^3");
+                    Vec3 expected = source.add(-3.0, 0.0, 0.0);
+                    helper.assertTrue(npc.position().distanceTo(expected) < 1.0E-3,
+                            "the NPC stands at " + npc.position() + ", not three blocks west of the source at " + expected);
+                    assertFacing(helper, npc, -90.0F, "the NPC spawned in front of the source");
+                })
+                .thenSucceed();
+    }
+
+    /** A source standing on the spawn spot, facing north, gets an NPC facing the other way: south. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void spawnOnTheSourcesSpotFacesAwayFromTheSourcesYaw(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    Vec3 at = helper.absoluteVec(new Vec3(2.5, 2.0, 2.5));
+                    NpcEntity npc = spawnByCommand(helper, at, 180.0F, "haruhi npc spawn " + GREETER);
+                    assertFacing(helper, npc, 0.0F, "the NPC spawned on the source's spot");
                 })
                 .thenSucceed();
     }
@@ -604,6 +641,32 @@ public final class NpcGameTests {
             }
         }
         return npcs;
+    }
+
+    /**
+     * Runs the spawn {@code command} as the console standing at {@code source} and facing {@code yaw}, and returns the one
+     * NPC it added. Fails the test when the command fails or adds no NPC or more than one.
+     */
+    private static NpcEntity spawnByCommand(GameTestHelper helper, Vec3 source, float yaw, String command) {
+        ServerLevel level = helper.getLevel();
+        List<NpcEntity> before = npcsIn(level);
+        Optional<CommandSyntaxException> failure = runCommand(level, source, yaw, command);
+        helper.assertTrue(failure.isEmpty(),
+                "the spawn command failed: " + failure.map(e -> e.getMessage()).orElse(""));
+        List<NpcEntity> added = npcsIn(level);
+        added.removeAll(before);
+        helper.assertValueEqual(added.size(), 1, "the spawn command added this many NPCs");
+        return added.get(0);
+    }
+
+    /** Fails unless the NPC's yaw, head yaw and body yaw are all the angle {@code expected}, in degrees mod 360. */
+    private static void assertFacing(GameTestHelper helper, NpcEntity npc, float expected, String what) {
+        float[] actual = {npc.getYRot(), npc.getYHeadRot(), npc.yBodyRot};
+        String[] parts = {"yaw", "head yaw", "body yaw"};
+        for (int i = 0; i < actual.length; i++) {
+            helper.assertTrue(Math.abs(Mth.wrapDegrees(actual[i] - expected)) < 1.0E-3F,
+                    what + " has a " + parts[i] + " of " + actual[i] + ", not " + expected);
+        }
     }
 
     /**

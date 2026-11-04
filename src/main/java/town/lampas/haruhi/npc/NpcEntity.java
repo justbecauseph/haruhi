@@ -9,7 +9,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
-import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
@@ -234,9 +233,7 @@ public class NpcEntity extends LivingEntity {
 
     /** Turns the NPC to face {@code target}, keeping it level. */
     private void faceTowards(Entity target) {
-        double dx = target.getX() - getX();
-        double dz = target.getZ() - getZ();
-        turnTo((float) (Mth.atan2(dz, dx) * (180.0 / Math.PI)) - 90.0F);
+        turnTo(NpcFacing.yawToward(target.getX() - getX(), target.getZ() - getZ()));
     }
 
     /**
