@@ -157,8 +157,10 @@ Field rules (the content component enforces them, and other components rely on t
   - Two keys that parse to the same id (`guard` and `minecraft:guard`) are an error.
   - Router weights must sum to at most `Integer.MAX_VALUE`. Flag namespaces and names must be non-empty and contain
     no NUL character.
-- **Portrait:** the visual-novel screen shows the node's `portrait`, else the speaking profile's `portrait` (resolved on
-  the server and sent in the payload), else a 3D render of the speaker entity when it is loaded, else none.
+- **Portrait:** the visual-novel screen shows a square headshot inside the text box, left of the speaker's name and the
+  text: the node's `portrait`, else the speaking profile's `portrait` (resolved on the server and sent in the payload),
+  stretched to the square, so portrait textures should be square; else a 3D render of the speaker entity's head and
+  shoulders when it is loaded; else no headshot, and the text column starts at the box's left padding.
 
 The model and texture ids are client assets. The server cannot check them, so the client falls back to the default
 model and the Steve skin when one is missing.
