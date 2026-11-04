@@ -106,6 +106,16 @@ public final class DialogueScreen extends Screen {
         return box == null ? OptionalInt.empty() : OptionalInt.of(box.boxY());
     }
 
+    /** The left edge of the choice rows drawn in the last frame, in GUI pixels; empty when none were drawn. */
+    OptionalInt choiceLeft() {
+        return choiceRows.stream().mapToInt(ChoiceRow::x0).min();
+    }
+
+    /** The top edge of the highest choice row drawn in the last frame, in GUI pixels; empty when none were drawn. */
+    OptionalInt choiceTop() {
+        return choiceRows.stream().mapToInt(ChoiceRow::y0).min();
+    }
+
     /** The entity this screen names as the speaker, when the node names one. */
     public OptionalInt speakerEntityId() {
         return node == null ? OptionalInt.empty() : node.speakerEntityId();

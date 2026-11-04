@@ -85,7 +85,38 @@ class DialogueHudTest {
 
     @Test
     void theChatStaysWhereVanillaPutsItWithoutADialogue() {
-        assertEquals(0, DialogueHud.chatShift(HEIGHT, OptionalInt.empty()));
+        assertEquals(0, DialogueHud.chatShift(HEIGHT, OptionalInt.empty(), 0));
+        assertEquals(OptionalInt.empty(),
+                DialogueHud.chatFloor(OptionalInt.empty(), OptionalInt.empty(), OptionalInt.empty(), 332));
+    }
+
+    /**
+     * The chat's background reaches x 332 at the default width (320 + 12). A choice list whose rows start at x 300 reaches
+     * across it, so the chat's floor is the top row at 100, not the box top at 144; a list that starts at x 340 does not,
+     * and neither does a node without choices.
+     */
+    @Test
+    void theChatGoesAboveTheChoiceListOnlyWhenTheListReachesAcrossIt() {
+        OptionalInt box = OptionalInt.of(144);
+        assertEquals(OptionalInt.of(100), DialogueHud.chatFloor(box, OptionalInt.of(300), OptionalInt.of(100), 332));
+        assertEquals(OptionalInt.of(144), DialogueHud.chatFloor(box, OptionalInt.of(340), OptionalInt.of(100), 332));
+        assertEquals(OptionalInt.of(144), DialogueHud.chatFloor(box, OptionalInt.empty(), OptionalInt.empty(), 332));
+
+        int chatBottom = HEIGHT - VANILLA_CHAT_RISE
+                + DialogueHud.chatShift(HEIGHT, DialogueHud.chatFloor(box, OptionalInt.of(300), OptionalInt.of(100), 332), 0);
+        assertAFewPixelsAbove(100, chatBottom);
+    }
+
+    /**
+     * With chat delay holding messages back, vanilla draws a 9-pixel queued-messages line under the chat's bottom edge.
+     * The chat moves up by that much more, so the line, not the last message, is what ends a few pixels above the box.
+     */
+    @Test
+    void theQueuedMessagesLineAlsoStaysAboveTheBox() {
+        int boxTop = 144;
+        int queued = 9;
+        int lineBottom = HEIGHT - VANILLA_CHAT_RISE + queued + DialogueHud.chatShift(HEIGHT, OptionalInt.of(boxTop), queued);
+        assertAFewPixelsAbove(boxTop, lineBottom);
     }
 
     /**
@@ -97,7 +128,7 @@ class DialogueHudTest {
         int boxTop = DialogueLayout.compute(WIDTH, HEIGHT, false, true, 9, 11, 0, width -> 1).boxY();
         assertEquals(144, boxTop);
 
-        int chatBottom = HEIGHT - VANILLA_CHAT_RISE + DialogueHud.chatShift(HEIGHT, OptionalInt.of(boxTop));
+        int chatBottom = HEIGHT - VANILLA_CHAT_RISE + DialogueHud.chatShift(HEIGHT, OptionalInt.of(boxTop), 0);
         assertAFewPixelsAbove(boxTop, chatBottom);
     }
 
@@ -105,7 +136,7 @@ class DialogueHudTest {
     @Test
     void theChatEndsAFewPixelsAboveATallerBox() {
         for (int boxTop : new int[] {120, 90, 40}) {
-            int chatBottom = HEIGHT - VANILLA_CHAT_RISE + DialogueHud.chatShift(HEIGHT, OptionalInt.of(boxTop));
+            int chatBottom = HEIGHT - VANILLA_CHAT_RISE + DialogueHud.chatShift(HEIGHT, OptionalInt.of(boxTop), 0);
             assertAFewPixelsAbove(boxTop, chatBottom);
         }
     }
@@ -113,7 +144,7 @@ class DialogueHudTest {
     /** The chat only ever moves up: a box that starts below the chat's bottom edge leaves it in place. */
     @Test
     void theChatIsNeverMovedDown() {
-        assertEquals(0, DialogueHud.chatShift(HEIGHT, OptionalInt.of(HEIGHT - VANILLA_CHAT_RISE + 20)));
+        assertEquals(0, DialogueHud.chatShift(HEIGHT, OptionalInt.of(HEIGHT - VANILLA_CHAT_RISE + 20), 0));
     }
 
     private static void assertAFewPixelsAbove(int boxTop, int chatBottom) {
