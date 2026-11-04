@@ -24,13 +24,15 @@ import town.lampas.haruhi.storage.StoredRevision;
 /**
  * The content service and the revision operations behind {@code /haruhi content} and the startup load. Activation and
  * listener calls run on the server thread. The revision methods need a running server and return futures that complete
- * on the server thread.
+ * on the server thread. Revision activations and rollbacks run one at a time, in the order they were requested.
  */
 public final class ContentServiceImpl implements ContentService {
     private volatile ContentBundle active = ContentBundle.EMPTY;
     private volatile OptionalLong revisionId = OptionalLong.empty();
     private volatile Optional<String> digest = Optional.empty();
+    private volatile boolean startupComplete;
     private final List<Consumer<ContentBundle>> listeners = new CopyOnWriteArrayList<>();
+    private final ActivationQueue activations = new ActivationQueue();
     private volatile MinecraftServer server;
 
     ContentServiceImpl() {}
@@ -48,6 +50,11 @@ public final class ContentServiceImpl implements ContentService {
     /** The digest of the active stored revision; empty before any is active and after {@link #activateUnstored}. */
     public Optional<String> activeDigest() {
         return digest;
+    }
+
+    @Override
+    public boolean isStartupComplete() {
+        return startupComplete;
     }
 
     @Override
@@ -86,6 +93,73 @@ public final class ContentServiceImpl implements ContentService {
      */
     public CompletableFuture<StoredRevision> activateRevision(long id, String actor) {
         MinecraftServer current = requireServer();
+        return activations.submit(() -> activateNow(current, id, actor));
+    }
+
+    /**
+     * Activates the stored revision with the latest {@code activatedAt} other than the active one. Fails when no other
+     * revision has ever been activated. The lookup runs after the activations requested before it.
+     */
+    public CompletableFuture<StoredRevision> rollback(String actor) {
+        MinecraftServer current = requireServer();
+        return activations.submit(() -> ServerThread.hop(current,
+                        HaruhiServices.storage().listRevisions(Integer.MAX_VALUE))
+                .thenCompose(revisions -> {
+                    Optional<RevisionSummary> target = revisions.stream()
+                            .filter(revision -> !revision.active())
+                            .filter(revision -> revision.activatedAt().isPresent())
+                            .max(Comparator.<RevisionSummary, Instant>comparing(
+                                    revision -> revision.activatedAt().orElseThrow()));
+                    if (target.isEmpty()) {
+                        return CompletableFuture.<StoredRevision>failedFuture(
+                                new IllegalStateException("No earlier content revision has been activated."));
+                    }
+                    return activateNow(current, target.get().id(), actor);
+                }));
+    }
+
+    /** Server lifecycle: the server that content parses against and activates on. */
+    void attach(MinecraftServer server) {
+        this.server = server;
+    }
+
+    /**
+     * Server lifecycle: forgets the stopped server and the content that was active on it. A singleplayer session can
+     * start another server in the same JVM, and that server starts from EMPTY until its own startup load finishes.
+     */
+    void detach() {
+        this.server = null;
+        this.active = ContentBundle.EMPTY;
+        this.revisionId = OptionalLong.empty();
+        this.digest = Optional.empty();
+        this.startupComplete = false;
+        activations.reset();
+    }
+
+    /** Called once the startup load has activated, imported or refused content. */
+    void startupFinished() {
+        this.startupComplete = true;
+    }
+
+    /**
+     * Makes {@code bundle} active and tells every listener, in registration order. A listener that throws is logged and
+     * the rest still run.
+     */
+    void activate(ContentBundle bundle, OptionalLong id, Optional<String> activeDigest) {
+        this.active = bundle;
+        this.revisionId = id;
+        this.digest = activeDigest;
+        for (Consumer<ContentBundle> listener : listeners) {
+            try {
+                listener.accept(bundle);
+            } catch (RuntimeException e) {
+                Haruhi.LOGGER.error("A content activation listener failed", e);
+            }
+        }
+    }
+
+    /** One activation, without the queue. Callers go through {@link #activations}. */
+    private CompletableFuture<StoredRevision> activateNow(MinecraftServer current, long id, String actor) {
         return ServerThread.hop(current, HaruhiServices.storage().loadRevision(id)).thenCompose(found -> {
             if (found.isEmpty()) {
                 return CompletableFuture.<StoredRevision>failedFuture(
@@ -106,53 +180,6 @@ public final class ContentServiceImpl implements ContentService {
                                 revision.author(), revision.createdAt(), Optional.of(now), true);
                     });
         });
-    }
-
-    /**
-     * Activates the stored revision with the latest {@code activatedAt} other than the active one. Fails when no other
-     * revision has ever been activated.
-     */
-    public CompletableFuture<StoredRevision> rollback(String actor) {
-        MinecraftServer current = requireServer();
-        return ServerThread.hop(current, HaruhiServices.storage().listRevisions(Integer.MAX_VALUE))
-                .thenCompose(revisions -> {
-                    Optional<RevisionSummary> target = revisions.stream()
-                            .filter(revision -> !revision.active())
-                            .filter(revision -> revision.activatedAt().isPresent())
-                            .max(Comparator.<RevisionSummary, Instant>comparing(
-                                    revision -> revision.activatedAt().orElseThrow()));
-                    if (target.isEmpty()) {
-                        return CompletableFuture.<StoredRevision>failedFuture(
-                                new IllegalStateException("No earlier content revision has been activated."));
-                    }
-                    return activateRevision(target.get().id(), actor);
-                });
-    }
-
-    /** Server lifecycle: the server that content parses against and activates on. */
-    void attach(MinecraftServer server) {
-        this.server = server;
-    }
-
-    void detach() {
-        this.server = null;
-    }
-
-    /**
-     * Makes {@code bundle} active and tells every listener, in registration order. A listener that throws is logged and
-     * the rest still run.
-     */
-    void activate(ContentBundle bundle, OptionalLong id, Optional<String> activeDigest) {
-        this.active = bundle;
-        this.revisionId = id;
-        this.digest = activeDigest;
-        for (Consumer<ContentBundle> listener : listeners) {
-            try {
-                listener.accept(bundle);
-            } catch (RuntimeException e) {
-                Haruhi.LOGGER.error("A content activation listener failed", e);
-            }
-        }
     }
 
     private MinecraftServer requireServer() {

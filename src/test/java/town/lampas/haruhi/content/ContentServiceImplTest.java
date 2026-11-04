@@ -1,6 +1,7 @@
 package town.lampas.haruhi.content;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -83,5 +84,33 @@ class ContentServiceImplTest {
         ValidatedBundle validated = service.validate(input).result().orElseThrow();
         assertEquals(BundleDigest.canonicalJson(JsonParser.parseString(input)), validated.canonicalJson());
         assertEquals(BundleDigest.sha256Hex(validated.canonicalJson()), validated.digest());
+    }
+
+    @Test
+    void detachForgetsTheContentOfTheStoppedServer() {
+        ContentServiceImpl service = new ContentServiceImpl();
+        ContentBundle bundle =
+                ContentTestSupport.bundleOf(ContentTestSupport.validate(ContentTestSupport.baseBundle()));
+        service.activate(bundle, OptionalLong.of(2), Optional.of("digest-of-revision-2"));
+        service.startupFinished();
+
+        service.detach();
+
+        assertSame(ContentBundle.EMPTY, service.active());
+        assertEquals(OptionalLong.empty(), service.activeRevisionId());
+        assertEquals(Optional.empty(), service.activeDigest());
+        assertFalse(service.isStartupComplete());
+    }
+
+    @Test
+    void startupIsCompleteFromTheEndOfTheStartupLoadUntilTheServerStops() {
+        ContentServiceImpl service = new ContentServiceImpl();
+        assertFalse(service.isStartupComplete());
+
+        service.startupFinished();
+        assertTrue(service.isStartupComplete());
+
+        service.detach();
+        assertFalse(service.isStartupComplete());
     }
 }

@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.DynamicOps;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -13,14 +14,20 @@ import town.lampas.haruhi.content.model.DialogueNode;
 
 /** Reads one dialogue graph: its start node and its nodes. */
 final class GraphReader {
+    /** The keys a graph may have. Any other key is an error. */
+    static final Set<String> GRAPH_KEYS = Set.of("start", "nodes");
+
     private final DynamicOps<JsonElement> ops;
     private final Problems problems;
     private final Set<Identifier> npcIds;
+    private final List<SpecSite> specs;
 
-    GraphReader(DynamicOps<JsonElement> ops, Problems problems, Set<Identifier> npcIds) {
+    /** {@code specs} collects every spec that parses, from every node this reader reads. */
+    GraphReader(DynamicOps<JsonElement> ops, Problems problems, Set<Identifier> npcIds, List<SpecSite> specs) {
         this.ops = ops;
         this.problems = problems;
         this.npcIds = npcIds;
+        this.specs = specs;
     }
 
     /**
@@ -38,6 +45,7 @@ final class GraphReader {
         int mark = problems.count();
         JsonObject object = value.getAsJsonObject();
         Fields fields = new Fields(object, where, problems);
+        fields.allowOnly(GRAPH_KEYS);
         Optional<String> start = fields.required("start", JsonValues::string);
         Optional<JsonObject> nodes = fields.required("nodes", JsonValues::object);
         if (nodes.isEmpty()) {
@@ -45,7 +53,7 @@ final class GraphReader {
         }
 
         Set<String> nodeIds = nodes.get().keySet();
-        NodeReader nodeReader = new NodeReader(ops, problems, graphId, nodeIds, npcIds);
+        NodeReader nodeReader = new NodeReader(ops, problems, graphId, nodeIds, npcIds, specs);
         Map<String, DialogueNode> parsed = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> entry : nodes.get().entrySet()) {
             nodeReader.read(entry.getKey(), entry.getValue()).ifPresent(node -> parsed.put(entry.getKey(), node));

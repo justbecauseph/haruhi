@@ -7,6 +7,7 @@ import com.mojang.serialization.DataResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -68,6 +69,18 @@ final class Fields {
 
     void add(String message) {
         problems.add(location, message);
+    }
+
+    /**
+     * Records {@code location: unknown key 'key'} for every key of the object that is not in {@code known}. A misspelt
+     * key must fail validation, not be ignored.
+     */
+    void allowOnly(Set<String> known) {
+        for (String key : object.keySet()) {
+            if (!known.contains(key)) {
+                add("unknown key '" + key + "'");
+            }
+        }
     }
 
     private <T> Optional<T> parse(String key, JsonElement value, Function<JsonElement, DataResult<T>> parser) {
