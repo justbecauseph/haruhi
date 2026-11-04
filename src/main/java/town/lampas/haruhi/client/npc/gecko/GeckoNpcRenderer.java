@@ -14,7 +14,6 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.resources.Identifier;
 import town.lampas.haruhi.client.npc.NpcLookAssets;
 import town.lampas.haruhi.npc.NpcEntity;
-import town.lampas.haruhi.npc.NpcLook;
 
 /**
  * The NPC renderer when GeckoLib is loaded. Vanilla registers one renderer per entity type, but an NPC's animations file is
@@ -62,9 +61,7 @@ public final class GeckoNpcRenderer extends EntityRenderer<NpcEntity, LivingEnti
 
     /** The animations file for the entity's look, after the same model fallback {@link NpcGeoModel} makes. */
     private static Identifier animationsFor(NpcEntity entity) {
-        NpcLook look = entity.look();
-        Identifier model = NpcLookAssets.resolveModel(look.model(), BakedAssets::hasModel);
-        return NpcLookAssets.resolveAnimations(look.animations(), model, BakedAssets::hasAnimations);
+        return BakedAssets.animations(entity.look());
     }
 
     /**

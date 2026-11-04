@@ -12,6 +12,8 @@ import java.util.Locale;
 import java.util.Optional;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.GameTestSequence;
@@ -29,12 +31,15 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.material.PushReaction;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.piston.PistonBaseBlock;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
@@ -253,28 +258,84 @@ public final class NpcGameTests {
     }
 
     /**
-     * Velocity from a push or set directly is never applied, a piston moves nothing, and a portal cannot take the NPC. The
-     * NPC is not pushed, as its class documents.
+     * A push from outside does not move the NPC. Explosions, wind charges and fishing rods all reach an entity as a push
+     * like this one, a velocity added to it, which vanilla then moves it by on the following ticks.
      */
     @GameTest(environment = ENVIRONMENT, maxTicks = 100)
-    public void npcIsNotMovedByPushesPistonsOrPortals(GameTestHelper helper) {
+    public void npcIsNotMovedByAPush(GameTestHelper helper) {
         Scene scene = new Scene();
         afterStartupContent(helper)
                 .thenExecute(() -> {
                     activateFixtures();
                     scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
                     scene.start = scene.npc.position();
-                    scene.npc.push(0.0, 1.0, 0.0);
-                    scene.npc.setDeltaMovement(0.0, 0.5, 0.0);
-                    scene.npc.move(MoverType.PISTON, new Vec3(0.0, 1.0, 0.0));
-                    helper.assertValueEqual(scene.npc.getDeltaMovement(), Vec3.ZERO, "the NPC took a velocity");
-                    helper.assertFalse(scene.npc.canUsePortal(false), "a portal can take the NPC");
-                    helper.assertValueEqual(scene.npc.getPistonPushReaction(), PushReaction.IGNORE,
-                            "a piston can push the NPC");
+                    scene.npc.push(0.3, 1.0, 0.3);
                 })
                 .thenIdle(40)
-                .thenExecute(() -> helper.assertTrue(
-                        scene.npc.position().distanceToSqr(scene.start) < 1.0E-9, "a push or piston moved the NPC"))
+                .thenExecute(() -> assertStillAtItsPost(helper, scene, "a push"))
+                .thenSucceed();
+    }
+
+    /** A piston that extends into the NPC leaves it where it stands. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
+    public void npcIsNotMovedByAPiston(GameTestHelper helper) {
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    helper.setBlock(new BlockPos(2, 2, 0),
+                            Blocks.PISTON.defaultBlockState().setValue(PistonBaseBlock.FACING, Direction.SOUTH));
+                    // The piston's head extends into the block at z = 1, where the NPC stands.
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 1.5));
+                    scene.start = scene.npc.position();
+                    helper.setBlock(new BlockPos(1, 2, 0), Blocks.REDSTONE_BLOCK);
+                })
+                .thenWaitUntil(() -> helper.assertBlockProperty(
+                        new BlockPos(2, 2, 0), PistonBaseBlock.EXTENDED, true))
+                .thenIdle(5)
+                .thenExecute(() -> assertStillAtItsPost(helper, scene, "a piston"))
+                .thenSucceed();
+    }
+
+    /** An NPC standing in a lit nether portal stays in its own dimension, at its post. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
+    public void npcDoesNotTravelThroughANetherPortal(GameTestHelper helper) {
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.start = scene.npc.position();
+                    helper.setBlock(new BlockPos(2, 2, 2), Blocks.NETHER_PORTAL);
+                    helper.setBlock(new BlockPos(2, 3, 2), Blocks.NETHER_PORTAL);
+                })
+                .thenIdle(40)
+                .thenExecute(() -> assertStillAtItsPost(helper, scene, "a nether portal"))
+                .thenSucceed();
+    }
+
+    /** A lingering cloud of levitation, as a lingering potion leaves, gives the NPC no effect and does not lift it. */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 100)
+    public void npcIsNotLiftedByALevitationCloud(GameTestHelper helper) {
+        Scene scene = new Scene();
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    activateFixtures();
+                    scene.npc = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                    scene.start = scene.npc.position();
+                    Vec3 at = scene.npc.position();
+                    AreaEffectCloud cloud = new AreaEffectCloud(helper.getLevel(), at.x, at.y, at.z);
+                    cloud.setRadius(2.0F);
+                    cloud.setWaitTime(0);
+                    cloud.setDuration(60);
+                    cloud.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 200));
+                    helper.getLevel().addFreshEntity(cloud);
+                })
+                .thenIdle(40)
+                .thenExecute(() -> {
+                    helper.assertFalse(scene.npc.hasEffect(MobEffects.LEVITATION), "the cloud gave the NPC levitation");
+                    assertStillAtItsPost(helper, scene, "a levitation cloud");
+                })
                 .thenSucceed();
     }
 
@@ -365,6 +426,14 @@ public final class NpcGameTests {
                             "an off-hand name tag renamed the NPC");
                 })
                 .thenSucceed();
+    }
+
+    /** Fails unless the scene's NPC is still in the test level, where it was spawned. */
+    private static void assertStillAtItsPost(GameTestHelper helper, Scene scene, String cause) {
+        helper.assertFalse(scene.npc.isRemoved(), cause + " removed the NPC from the level: " + scene.npc.getRemovalReason());
+        helper.assertTrue(scene.npc.level() == helper.getLevel(), cause + " took the NPC to " + scene.npc.level().dimension());
+        helper.assertTrue(scene.npc.position().distanceToSqr(scene.start) < 1.0E-9,
+                cause + " moved the NPC from " + scene.start + " to " + scene.npc.position());
     }
 
     /** Waits for the startup content activation before a test activates its own content. */

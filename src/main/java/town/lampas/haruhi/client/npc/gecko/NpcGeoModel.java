@@ -41,7 +41,7 @@ final class NpcGeoModel extends GeoModel<NpcAnimatable> {
             return;
         }
         NpcLook look = npc.look();
-        state.addGeckolibData(NpcRenderData.MODEL, NpcLookAssets.resolveModel(look.model(), BakedAssets::hasModel));
+        state.addGeckolibData(NpcRenderData.MODEL, BakedAssets.model(look));
         state.addGeckolibData(NpcRenderData.TEXTURE,
                 NpcLookAssets.resolveTexture(look.texture(), NpcLookAssets::resourceExists));
         state.addGeckolibData(NpcRenderData.SPEAKING, DialogueClient.isSpeaking(npc.getId()));

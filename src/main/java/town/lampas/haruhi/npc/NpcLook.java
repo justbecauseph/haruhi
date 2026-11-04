@@ -15,7 +15,8 @@ import town.lampas.haruhi.content.model.NpcProfile;
  *
  * @param model a GeckoLib model id; empty means the built-in default humanoid model
  * @param texture the model's texture, or the skin texture when {@code model} is empty
- * @param animations a GeckoLib animation id; empty means the default humanoid animations
+ * @param animations a GeckoLib animation id; empty means the model's own animations (the animations file with the model's
+ *     id) when there is one, else the default humanoid animations
  */
 public record NpcLook(Optional<Identifier> model, Identifier texture, Optional<Identifier> animations) {
 
@@ -40,7 +41,7 @@ public record NpcLook(Optional<Identifier> model, Identifier texture, Optional<I
         return texture.toString();
     }
 
-    /** The synced form of {@link #animations}: the id, or the empty string for the default humanoid animations. */
+    /** The synced form of {@link #animations}: the id, or the empty string when the profile names none. */
     String syncedAnimations() {
         return synced(animations);
     }

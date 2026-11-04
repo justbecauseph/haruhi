@@ -1,0 +1,29 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "idle": {
+      "loop": true,
+      "animation_length": 2.0,
+      "bones": {
+        "tail": {
+          "rotation": {
+            "0.0": [0, 0, 0],
+            "1.0": [0, 15, 0],
+            "2.0": [0, 0, 0]
+          }
+        }
+      }
+    },
+    "sit": {
+      "animation_length": 1.0,
+      "bones": {
+        "torso": {
+          "rotation": {
+            "0.0": [0, 0, 0],
+            "1.0": [-20, 0, 0]
+          }
+        }
+      }
+    }
+  }
+}
