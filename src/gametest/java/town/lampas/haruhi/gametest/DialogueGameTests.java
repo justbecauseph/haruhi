@@ -33,6 +33,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.common.ClientboundShowDialogPacket;
 import net.minecraft.network.protocol.common.ServerboundCustomClickActionPacket;
+import net.minecraft.network.protocol.game.ClientboundSoundPacket;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.dialog.ActionButton;
@@ -577,6 +579,37 @@ public final class DialogueGameTests {
                 .thenSucceed();
     }
 
+    @GameTest(maxTicks = 20)
+    public void messageAndSoundActionsReachThePlayer(GameTestHelper helper) {
+        helper.startSequence()
+                .thenExecute(() -> {
+                    Client client = joinClient(helper, UUID.randomUUID());
+                    PlayerContext context = new PlayerContext(client.player());
+                    client.sent();
+                    action(helper, "haruhi:message", "{\"text\":\"Welcome to Maraha.\"}").run(context);
+                    action(helper, "haruhi:sound", "{\"sound\":\"minecraft:block.note_block.bell\",\"volume\":0.5}")
+                            .run(context);
+                    List<Object> sent = client.sent();
+
+                    List<ClientboundSystemChatPacket> chat = sent.stream()
+                            .filter(ClientboundSystemChatPacket.class::isInstance)
+                            .map(ClientboundSystemChatPacket.class::cast).toList();
+                    helper.assertValueEqual(chat.size(), 1, "chat messages sent to the player");
+                    helper.assertValueEqual(chat.get(0).content().getString(), "Welcome to Maraha.", "the chat message");
+                    helper.assertFalse(chat.get(0).overlay(), "the message goes to chat, not the action bar");
+
+                    List<ClientboundSoundPacket> sounds = sent.stream()
+                            .filter(ClientboundSoundPacket.class::isInstance)
+                            .map(ClientboundSoundPacket.class::cast).toList();
+                    helper.assertValueEqual(sounds.size(), 1, "sounds played to the player");
+                    helper.assertValueEqual(sounds.get(0).getSound().value().location(),
+                            Identifier.fromNamespaceAndPath("minecraft", "block.note_block.bell"), "the sound played");
+                    helper.assertValueEqual(sounds.get(0).getVolume(), 0.5F, "the volume given");
+                    helper.assertValueEqual(sounds.get(0).getPitch(), 1.0F, "the pitch, which defaults to 1");
+                })
+                .thenSucceed();
+    }
+
     @GameTest(maxTicks = 200)
     public void aChainOfOpensPastTheLimitStillReportsTheFirstGraphAsOpened(GameTestHelper helper) {
         Subject subject = new Subject();
@@ -783,6 +816,14 @@ public final class DialogueGameTests {
         return parsed.result().orElseThrow();
     }
 
+    private static DialogueAction action(GameTestHelper helper, String type, String args) {
+        DataResult<DialogueAction> parsed = DialogueRegistries.action(Identifier.parse(type)).orElseThrow()
+                .parse(JsonParser.parseString(args).getAsJsonObject(), PROBE_PARSE);
+        helper.assertTrue(parsed.result().isPresent(), type + " " + args + " should parse: "
+                + parsed.error().map(error -> error.message()).orElse("?"));
+        return parsed.result().orElseThrow();
+    }
+
     /** {@code haruhi:command} as parsed under a config with this permission level and only {@code tag} allowed. */
     private static DialogueAction commandAt(GameTestHelper helper, int level, String command) {
         JsonObject args = new JsonObject();
@@ -935,18 +976,24 @@ public final class DialogueGameTests {
     /** A mock player and the channel that receives what the server sends it. */
     private record Client(ServerPlayer player, EmbeddedChannel channel) {
         /**
-         * Every dialog the server sent since the last call, oldest first. The server thread writes without flushing, so the
+         * Everything the server sent since the last read, oldest first. The server thread writes without flushing, so the
          * channel is flushed first.
          */
-        List<Dialog> dialogsSent() {
+        List<Object> sent() {
             channel.flushOutbound();
-            List<Dialog> dialogs = new ArrayList<>();
+            List<Object> messages = new ArrayList<>();
             for (Object message = channel.readOutbound(); message != null; message = channel.readOutbound()) {
-                if (message instanceof ClientboundShowDialogPacket show) {
-                    dialogs.add(show.dialog().value());
-                }
+                messages.add(message);
             }
-            return dialogs;
+            return messages;
+        }
+
+        /** Every dialog the server sent since the last read, oldest first. */
+        List<Dialog> dialogsSent() {
+            return sent().stream()
+                    .filter(ClientboundShowDialogPacket.class::isInstance)
+                    .map(message -> ((ClientboundShowDialogPacket) message).dialog().value())
+                    .toList();
         }
     }
 
