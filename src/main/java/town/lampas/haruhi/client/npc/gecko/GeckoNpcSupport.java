@@ -1,8 +1,10 @@
 package town.lampas.haruhi.client.npc.gecko;
 
+import java.util.Optional;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.EntityType;
+import town.lampas.haruhi.client.npc.HeadshotFraming;
 import town.lampas.haruhi.npc.NpcEntity;
 
 /**
@@ -26,5 +28,16 @@ public final class GeckoNpcSupport {
         if (minecraft.getEntityRenderDispatcher().getRenderer(npc) instanceof GeckoNpcRenderer renderer) {
             renderer.playAnimation(npc, animation);
         }
+    }
+
+    /**
+     * The rest-pose box of the head bone of the model {@code npc} is drawn with, when {@link GeckoNpcRenderer} draws it:
+     * the model its look names when GeckoLib baked it, else the default humanoid. Client thread only.
+     */
+    public static Optional<HeadshotFraming.Box> headBounds(NpcEntity npc) {
+        if (!(Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(npc) instanceof GeckoNpcRenderer)) {
+            return Optional.empty();
+        }
+        return HeadBounds.forModel(BakedAssets.model(npc.look()));
     }
 }
