@@ -26,13 +26,11 @@ public final class PendingRewards {
 
     private final Map<UUID, List<Reward>> waiting = new LinkedHashMap<>();
 
-    /** Gives the reward now when the player is online and alive, and keeps it for {@link #tick} otherwise. */
+    /**
+     * Gives the reward now when the player is online and alive, and keeps it for {@link #tick} otherwise. Called on the
+     * server thread only, through {@link town.lampas.haruhi.dialogue.ServerThread}.
+     */
     void give(MinecraftServer server, UUID playerId, Identifier lootTableId, LootTable table) {
-        if (!server.isSameThread()) {
-            // MinecraftServer.execute runs a task on the calling thread once the server has stopped.
-            logLost(playerId, lootTableId);
-            return;
-        }
         ServerPlayer player = server.getPlayerList().getPlayer(playerId);
         if (canReceive(player)) {
             handOver(player, table);

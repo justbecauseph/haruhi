@@ -3,7 +3,8 @@ package town.lampas.haruhi.dialogue.flags;
 import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
+import net.minecraft.util.thread.BlockableEventLoop;
+import town.lampas.haruhi.dialogue.ServerThread;
 import town.lampas.haruhi.storage.FlagChange;
 import town.lampas.haruhi.storage.FlagKey;
 
@@ -15,14 +16,17 @@ public final class PlayerFlags implements DurableFlags {
     private final UUID character;
     private final CharacterCache cache;
     private final CharacterStore store;
-    private final Executor serverThread;
+    private final BlockableEventLoop<?> server;
 
-    /** @param serverThread runs the cache restore after a failed durable write, which must happen on the server thread */
-    public PlayerFlags(UUID character, CharacterCache cache, CharacterStore store, Executor serverThread) {
+    /**
+     * @param server the server whose thread runs the cache restore after a failed durable write. The restore is dropped
+     *     when the write fails after the server has stopped.
+     */
+    public PlayerFlags(UUID character, CharacterCache cache, CharacterStore store, BlockableEventLoop<?> server) {
         this.character = character;
         this.cache = cache;
         this.store = store;
-        this.serverThread = serverThread;
+        this.server = server;
     }
 
     @Override
@@ -58,7 +62,8 @@ public final class PlayerFlags implements DurableFlags {
         CompletableFuture<Void> written = store.writeDurably(character, FlagChange.set(key, value), previous);
         written.whenComplete((ignored, error) -> {
             if (error != null) {
-                serverThread.execute(() -> cache.restoreFlag(key, value, previous));
+                ServerThread.execute(server, "the restore of " + key.namespace() + " " + key.flag()
+                        + " for " + character + " after its write failed", () -> cache.restoreFlag(key, value, previous));
             }
         });
         return written;
