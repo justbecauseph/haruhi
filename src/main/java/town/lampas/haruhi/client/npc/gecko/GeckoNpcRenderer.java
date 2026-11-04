@@ -5,6 +5,7 @@ import com.geckolib.renderer.base.GeoRenderState;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.OptionalDouble;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
@@ -12,6 +13,7 @@ import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.resources.Identifier;
+import town.lampas.haruhi.client.npc.NameTagPlacement;
 import town.lampas.haruhi.client.npc.NpcLookAssets;
 import town.lampas.haruhi.npc.NpcEntity;
 
@@ -42,6 +44,23 @@ public final class GeckoNpcRenderer extends EntityRenderer<NpcEntity, LivingEnti
         Identifier animations = animationsFor(entity);
         renderers.computeIfAbsent(animations, this::createRenderer).extractRenderState(entity, state, partialTick);
         ((GeoRenderState) state).addGeckolibData(NpcRenderData.ANIMATIONS, animations);
+        placeNameTag(state, BakedAssets.model(entity.look()));
+    }
+
+    /**
+     * Moves a shown name tag from the hitbox top to {@link NameTagPlacement#GAP} above the top of {@code model}, the model
+     * the entity is drawn with, times {@code state.scale}, by which {@code GeoReplacedEntityRenderer} scales it. Leaves
+     * vanilla's attachment when GeckoLib has not baked the model or it has no cubes. GeckoLib also lifts the model 0.01
+     * blocks times the scale in {@code adjustRenderPose}, which is left out.
+     */
+    static void placeNameTag(LivingEntityRenderState state, Identifier model) {
+        if (state.nameTagAttachment == null) {
+            return;
+        }
+        OptionalDouble top = ModelTops.forModel(model);
+        if (top.isPresent()) {
+            state.nameTagAttachment = NameTagPlacement.above(state.nameTagAttachment, top.getAsDouble(), state.scale);
+        }
     }
 
     @Override

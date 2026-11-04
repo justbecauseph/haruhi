@@ -5,6 +5,7 @@ import java.lang.reflect.Method;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -25,7 +26,7 @@ import net.minecraft.server.packs.resources.ResourceManager;
 
 /**
  * What {@link GeckoLibSandbox} runs inside its class loader to get GeckoLib working. Never call it from a test directly:
- * it changes static state that the rest of the test JVM shares.
+ * it changes static state that the rest of the test JVM shares. A check method running in the sandbox may call it.
  */
 final class GeckoLibSandboxClient {
     /** One of Haruhi's own GeckoLib files: the default humanoid model. Its pack root is 5 directories up. */
@@ -46,10 +47,23 @@ final class GeckoLibSandboxClient {
         Bootstrap.bootStrap();
         registerGeckoLibDataComponents();
         standInForTheClient();
+        bake();
+    }
 
-        PackResources mod = pack("haruhi", root(MOD_ASSET, 5));
-        PackResources fixtures = pack("fixtures", root(FIXTURE_PACK, 0));
-        resources = new MultiPackResourceManager(PackType.CLIENT_RESOURCES, List.of(mod, fixtures));
+    /**
+     * Has GeckoLib bake the mod's assets and the fixture pack, with each of {@code overlays} over them, as a client
+     * resource reload does: GeckoLib replaces its caches with newly baked models. An overlay is a classpath directory
+     * that is a pack root, and a later pack wins over an earlier one. A sandbox check that bakes with overlays must bake
+     * again without them before it returns, because the checks share GeckoLib's caches.
+     */
+    static void bake(String... overlays) throws ReflectiveOperationException, URISyntaxException {
+        List<PackResources> packs = new ArrayList<>();
+        packs.add(pack("haruhi", root(MOD_ASSET, 5)));
+        packs.add(pack("fixtures", root(FIXTURE_PACK, 0)));
+        for (String overlay : overlays) {
+            packs.add(pack(overlay, root(overlay, 0)));
+        }
+        resources = new MultiPackResourceManager(PackType.CLIENT_RESOURCES, packs);
         PreparableReloadListener geckoLib = (PreparableReloadListener)
                 Class.forName("com.geckolib.cache.GeckoLibResources").getConstructor().newInstance();
         PreparableReloadListener.SharedState state = new PreparableReloadListener.SharedState(resources);

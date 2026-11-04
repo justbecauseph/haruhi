@@ -3,7 +3,9 @@ package town.lampas.haruhi.client.npc.gecko;
 import com.geckolib.cache.BakedAnimationCache;
 import com.geckolib.cache.BakedModelCache;
 import com.geckolib.cache.GeckoLibResources;
+import com.geckolib.cache.model.BakedGeoModel;
 import net.minecraft.resources.Identifier;
+import org.jspecify.annotations.Nullable;
 import town.lampas.haruhi.client.npc.NpcLookAssets;
 import town.lampas.haruhi.npc.NpcLook;
 
@@ -26,8 +28,16 @@ final class BakedAssets {
     }
 
     static boolean hasModel(Identifier model) {
+        return baked(model) != null;
+    }
+
+    /**
+     * The model GeckoLib baked under {@code model}; null when it baked none, or has not baked yet. A resource reload bakes
+     * new instances.
+     */
+    static @Nullable BakedGeoModel baked(Identifier model) {
         BakedModelCache models = GeckoLibResources.getBakedModels();
-        return models != null && models.cache().containsKey(model);
+        return models == null ? null : models.cache().get(model);
     }
 
     static boolean hasAnimations(Identifier animations) {

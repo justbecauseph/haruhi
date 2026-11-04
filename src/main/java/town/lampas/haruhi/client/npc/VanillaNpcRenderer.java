@@ -28,6 +28,20 @@ public final class VanillaNpcRenderer extends LivingEntityRenderer<NpcEntity, Va
         super.extractRenderState(entity, state, partialTick);
         HumanoidMobRenderer.extractHumanoidRenderState(entity, state, partialTick, this.itemModelResolver);
         state.texture = NpcLookAssets.resolveTexture(entity.look().texture(), NpcLookAssets::resourceExists);
+        placeNameTag(state);
+    }
+
+    /**
+     * Moves a shown name tag from the hitbox top to {@link NameTagPlacement#GAP} above the model's top. The model is the
+     * vanilla wide player model ({@code PlayerModel.createMesh}), whose hat layer is {@link NameTagPlacement#HUMANOID_TOP}
+     * above its feet. {@code LivingEntityRenderer.submit} scales it by {@code state.scale} only: this renderer adds no
+     * scale of its own, and its {@code -1.501} offset lifts the model a thousandth of a block, which is left out.
+     */
+    static void placeNameTag(VanillaNpcRenderState state) {
+        if (state.nameTagAttachment != null) {
+            state.nameTagAttachment =
+                    NameTagPlacement.above(state.nameTagAttachment, NameTagPlacement.HUMANOID_TOP, state.scale);
+        }
     }
 
     @Override
