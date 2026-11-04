@@ -2,9 +2,13 @@
 
 Haruhi is a Fabric 26.2 mod for scriptable NPCs:
 - data-driven dialogue graphs, edited as one JSON content bundle;
-- a visual-novel dialogue screen, with vanilla dialogs as the fallback;
+- a visual-novel dialogue screen, with vanilla dialogs as the fallback for a client without Haruhi's dialogue channel;
 - NPCs rendered with Blockbench models through GeckoLib;
 - per-character dialogue flags and visit counts.
+
+In practice every client needs Haruhi: the `haruhi:npc` entity type is a synced registry entry, so Fabric API's registry
+sync disconnects a client that lacks it before it joins, and the vanilla dialog fallback is not reached by a normal
+player. Human-facing documentation is in `README.md` and `docs/`; keep it in step when behaviour changes.
 
 It is the framework half of the Lampas
 [Guild commissions and NPC framework plan](https://github.com/justbecauseph/lampas-two-kb/blob/main/docs/plan/GUILD-PLAN.md).
