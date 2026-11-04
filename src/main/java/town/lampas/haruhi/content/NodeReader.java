@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import town.lampas.haruhi.dialogue.api.DialogueRegistries;
 import town.lampas.haruhi.content.model.ActionSpec;
 import town.lampas.haruhi.content.model.ConditionSpec;
 import town.lampas.haruhi.content.model.DialogueChoice;
@@ -230,7 +231,9 @@ final class NodeReader {
                 if (target != null && JsonValues.isString(target)) {
                     requireNode(target.getAsString(), "goto node", where);
                 }
-            } else if (OPEN.equals(action.type())) {
+            } else if (OPEN.equals(action.type()) && DialogueRegistries.action(OPEN).isEmpty()) {
+                // With the built-in registered, its own parse reports a missing graph; checking here too would
+                // report it twice.
                 JsonElement target = action.args().get("graph");
                 Identifier id = target != null && JsonValues.isString(target)
                         ? Identifier.tryParse(target.getAsString())
