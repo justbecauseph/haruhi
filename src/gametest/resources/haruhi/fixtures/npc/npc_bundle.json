@@ -10,6 +10,12 @@
     "haruhi:fixture/silent": {
       "name": "Silent",
       "texture": "minecraft:textures/entity/player/wide/steve.png"
+    },
+    "haruhi:fixture/styled": {
+      "name": "Styled",
+      "model": "haruhi:fixture/styled",
+      "texture": "haruhi:textures/npc/fixture/styled.png",
+      "animations": "haruhi:fixture/styled"
     }
   },
   "dialogues": {

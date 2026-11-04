@@ -3,6 +3,7 @@ package town.lampas.haruhi.npc;
 import java.util.Optional;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -34,16 +35,28 @@ import town.lampas.haruhi.content.model.NpcProfile;
  * void. Right-clicking it with the main hand faces the player and opens the profile's dialogue.
  *
  * <p>The profile id is saved. The look is recomputed from the active content when the profile is set, when the entity is
- * first ticked after loading, and when a content revision activates.
+ * first ticked after loading, and when a content revision activates. It is synced as three vanilla string entries, so
+ * the entity uses only vanilla entity data serializers, whose ids are the same on every server and client.
  */
 public class NpcEntity extends LivingEntity {
-    static final EntityDataAccessor<NpcLook> LOOK = SynchedEntityData.defineId(NpcEntity.class, NpcLook.SERIALIZER);
+    static final EntityDataAccessor<String> LOOK_MODEL =
+            SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
+    static final EntityDataAccessor<String> LOOK_TEXTURE =
+            SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
+    static final EntityDataAccessor<String> LOOK_ANIMATIONS =
+            SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
 
     private static final String PROFILE_KEY = "profile";
 
     private @Nullable Identifier profileId;
     /** True until the first tick after a load or a profile change refreshes the look from the active content. */
     private boolean lookStale = true;
+    /**
+     * {@link #look()} rebuilt from the synced strings, or null until it is next read. Cleared whenever one of them
+     * changes, which {@link #onSyncedDataUpdated} reports on both sides: for {@code set} on the server and for every
+     * received value on the client.
+     */
+    private @Nullable NpcLook cachedLook;
 
     public NpcEntity(EntityType<? extends NpcEntity> type, Level level) {
         super(type, level);
@@ -65,7 +78,13 @@ public class NpcEntity extends LivingEntity {
 
     /** The look the server last synced to this entity. Safe on both sides. */
     public NpcLook look() {
-        return entityData.get(LOOK);
+        NpcLook look = cachedLook;
+        if (look == null) {
+            look = NpcLook.fromSynced(
+                    entityData.get(LOOK_MODEL), entityData.get(LOOK_TEXTURE), entityData.get(LOOK_ANIMATIONS));
+            cachedLook = look;
+        }
+        return look;
     }
 
     /** Gives this NPC a profile and refreshes its look from the active content. Server thread only. */
@@ -83,7 +102,10 @@ public class NpcEntity extends LivingEntity {
         Optional<NpcProfile> profile = profileId == null
                 ? Optional.empty()
                 : Optional.ofNullable(bundle.npcs().get(profileId));
-        entityData.set(LOOK, profile.map(NpcLook::of).orElse(NpcLook.DEFAULT));
+        NpcLook look = profile.map(NpcLook::of).orElse(NpcLook.DEFAULT);
+        entityData.set(LOOK_MODEL, look.syncedModel());
+        entityData.set(LOOK_TEXTURE, look.syncedTexture());
+        entityData.set(LOOK_ANIMATIONS, look.syncedAnimations());
 
         AttributeInstance scale = getAttribute(Attributes.SCALE);
         double wanted = profile.map(p -> (double) p.scale()).orElse(1.0);
@@ -175,7 +197,17 @@ public class NpcEntity extends LivingEntity {
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
-        builder.define(LOOK, NpcLook.DEFAULT);
+        builder.define(LOOK_MODEL, NpcLook.DEFAULT.syncedModel());
+        builder.define(LOOK_TEXTURE, NpcLook.DEFAULT.syncedTexture());
+        builder.define(LOOK_ANIMATIONS, NpcLook.DEFAULT.syncedAnimations());
+    }
+
+    @Override
+    public void onSyncedDataUpdated(EntityDataAccessor<?> accessor) {
+        super.onSyncedDataUpdated(accessor);
+        if (LOOK_MODEL.equals(accessor) || LOOK_TEXTURE.equals(accessor) || LOOK_ANIMATIONS.equals(accessor)) {
+            cachedLook = null;
+        }
     }
 
     @Override

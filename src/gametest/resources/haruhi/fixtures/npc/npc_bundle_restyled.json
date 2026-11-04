@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "flags": {},
+  "npcs": {
+    "haruhi:fixture/styled": {
+      "name": "Styled",
+      "texture": "minecraft:textures/entity/player/slim/alex.png"
+    }
+  },
+  "dialogues": {}
+}
