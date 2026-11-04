@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "flags": {},
+  "npcs": {
+    "haruhi:fixture/greeter": {
+      "name": "Greeter",
+      "texture": "minecraft:textures/entity/player/wide/steve.png",
+      "dialogue": "haruhi:fixture/greeter"
+    },
+    "haruhi:fixture/silent": {
+      "name": "Silent",
+      "texture": "minecraft:textures/entity/player/wide/steve.png"
+    }
+  },
+  "dialogues": {
+    "haruhi:fixture/greeter": {
+      "start": "hello",
+      "nodes": {
+        "hello": {
+          "speaker": "haruhi:fixture/greeter",
+          "text": "Welcome to Maraha."
+        }
+      }
+    }
+  }
+}
