@@ -259,15 +259,26 @@ final class GeometryCompiler {
         }
     }
 
-    /** Texture.getDefault, as far as a file can tell: the texture marked use_as_default, else the first. */
+    /**
+     * Texture.getDefault, as far as a file can tell. Blockbench reads use_as_default only in a format that sets
+     * single_texture_default, which among the built-in formats is bedrock_block alone: "if
+     * (Format.single_texture_default) { let default_enabled = Texture.all.find(tex => tex.use_as_default); if
+     * (default_enabled) return default_enabled; }". Otherwise it returns the selected texture, which a file does not
+     * record, and after a fresh load that is the first texture, so the first is taken here.
+     */
     private int defaultTexture() {
-        for (int i = 0; i < project.textures.size(); i++) {
-            if (BbProject.bool(project.textures.get(i), "use_as_default", false)) {
-                return i;
+        if (SINGLE_TEXTURE_DEFAULT_FORMAT.equals(project.modelFormat)) {
+            for (int i = 0; i < project.textures.size(); i++) {
+                if (BbProject.bool(project.textures.get(i), "use_as_default", false)) {
+                    return i;
+                }
             }
         }
         return project.textures.isEmpty() ? NOT_DRAWN : 0;
     }
+
+    /** The one built-in Blockbench format that sets single_texture_default. */
+    private static final String SINGLE_TEXTURE_DEFAULT_FORMAT = "bedrock_block";
 
     /**
      * The texture a face draws with, or NOT_DRAWN. A bbmodel face stores its texture as an index into the textures array
@@ -400,13 +411,21 @@ final class GeometryCompiler {
         }
 
         boolean boxUv = BbProject.bool(json, "box_uv", project.projectBoxUv);
-        boolean mirrorUv = BbProject.bool(json, "mirror_uv", false);
+        // The file's mirror_uv after processCompatibility (BbProject.Element.mirrorUv).
+        boolean mirrorUv = element.mirrorUv;
         if (boxUv) {
             String reason = boxUvProblem(textures, size, atlas);
             if (reason == null) {
                 double[] uvOffset = json.has("uv_offset") ? BbProject.vector(json.getAsJsonArray("uv_offset"), 2, null)
                         : new double[2];
                 TextureAtlas.Placement placement = atlas.placement(textures[0]);
+                if (atlas.stitched()) {
+                    // The six box faces are checked the way the per-face rectangles are below.
+                    double[][] boxRects = boxUvRects(json, size, mirrorUv);
+                    for (int i = 0; i < FACES.length; i++) {
+                        warnIfOutside(element, FACES[i], boxRects[i], placement);
+                    }
+                }
                 // "template.uv = cube.uv_offset; if (cube.mirror_uv === !bone.mirror) template.mirror = cube.mirror_uv"
                 cube.add("uv", array(placement.u(uvOffset[0]), placement.v(uvOffset[1])));
                 if (mirrorUv == !boneMirror) {
@@ -425,9 +444,8 @@ final class GeometryCompiler {
             }
             TextureAtlas.Placement placement = atlas.placement(textures[i]);
             double[] rect = rects[i];
-            if (atlas.stitched() && outside(rect, placement)) {
-                report.warn("face UV reaches outside its texture, so in the atlas it shows part of another texture",
-                        element.name + " " + FACES[i] + " (" + placement.name() + ")");
+            if (atlas.stitched()) {
+                warnIfOutside(element, FACES[i], rect, placement);
             }
             double u = placement.u(rect[0]);
             double v = placement.v(rect[1]);
@@ -539,6 +557,14 @@ final class GeometryCompiler {
                     face[1] + face[3] + offset[1]};
         }
         return rects;
+    }
+
+    /** A face rectangle that reaches past its texture's UV space would show part of a neighbouring texture in the atlas. */
+    private void warnIfOutside(Element element, String face, double[] rect, TextureAtlas.Placement placement) {
+        if (outside(rect, placement)) {
+            report.warn("face UV reaches outside its texture, so in the atlas it shows part of another texture",
+                    element.name + " " + face + " (" + placement.name() + ")");
+        }
     }
 
     private static boolean outside(double[] rect, TextureAtlas.Placement placement) {

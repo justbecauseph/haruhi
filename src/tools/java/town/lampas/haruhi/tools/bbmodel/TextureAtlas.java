@@ -190,10 +190,13 @@ final class TextureAtlas {
             uvWidth = BbProject.number(texture, "uv_width", uvWidth);
             uvHeight = BbProject.number(texture, "uv_height", uvHeight);
         }
-        // textures.js frameCount: a texture taller than its UV aspect is a flipbook; faces map onto its first frame.
+        // textures.js: "get frameCount() { if (Format.animated_textures && this.ratio !== (this.getUVWidth() /
+        // this.getUVHeight())) { let frames = Math.ceil((this.getUVWidth() / this.getUVHeight()) / this.ratio - 0.05);
+        // if (frames > 1) return frames; } }"
+        // Only the animated formats split the image; in the others the whole image is kept and the UV space maps onto it.
         double ratio = (double) image.getWidth() / image.getHeight();
         int frames = 1;
-        if (ratio != uvWidth / uvHeight) {
+        if (project.animatedTextures && ratio != uvWidth / uvHeight) {
             int counted = (int) Math.ceil((uvWidth / uvHeight) / ratio - 0.05);
             if (counted > 1) {
                 frames = counted;
