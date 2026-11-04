@@ -293,7 +293,8 @@ final class GeometryCompiler {
                 index = textureByUuid(texture.getAsString());
             }
         }
-        if (index != NOT_DRAWN && project.singleTexture) {
+        // bbmodel.js load: in a single-texture format every face that is not null gets the default texture.
+        if (project.singleTexture && defaultTexture != NOT_DRAWN) {
             return defaultTexture;
         }
         if (index >= 0 && index < project.textures.size()) {
