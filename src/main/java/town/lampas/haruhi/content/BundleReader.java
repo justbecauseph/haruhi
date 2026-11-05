@@ -15,18 +15,21 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import town.lampas.haruhi.content.api.ContentExtensions;
+import town.lampas.haruhi.content.api.ExtensionContext;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.content.model.DialogueGraph;
 import town.lampas.haruhi.content.model.FlagNamespace;
 import town.lampas.haruhi.content.model.NpcProfile;
 
 /**
- * Reads a whole bundle object: the schema, the flag namespaces, the NPC profiles and the dialogue graphs. A broken
- * entry is left out of the result and its problems are recorded, so the caller can still check the rest.
+ * Reads a whole bundle object: the schema, the flag namespaces, the NPC profiles, the dialogue graphs and the
+ * extension sections. A broken entry is left out of the result and its problems are recorded, so the caller can
+ * still check the rest.
  */
 final class BundleReader {
     /** The keys a bundle object may have. Any other key is an error. */
-    static final Set<String> BUNDLE_KEYS = Set.of("schema", "flags", "npcs", "dialogues");
+    static final Set<String> BUNDLE_KEYS = Set.of("schema", "flags", "npcs", "dialogues", "extensions");
     /** The keys an NPC profile may have. Any other key is an error. */
     static final Set<String> NPC_KEYS =
             Set.of("name", "model", "texture", "animations", "portrait", "dialogue", "scale");
@@ -91,8 +94,109 @@ final class BundleReader {
             }
         }
 
-        ContentBundle partial = new ContentBundle(ContentBundle.SCHEMA, flags, npcs, graphs);
+        ContentBundle withoutExtensions = new ContentBundle(ContentBundle.SCHEMA, flags, npcs, graphs);
+        Map<Identifier, Object> extensions = readExtensions(
+                entries(root, "extensions", problems), withoutExtensions, npcIds, graphIds, ops, problems);
+        ContentBundle partial = new ContentBundle(ContentBundle.SCHEMA, flags, npcs, graphs, extensions);
         return new Read(partial, Set.copyOf(complete), List.copyOf(specs));
+    }
+
+    /**
+     * Runs each section through its registered extension. A section under an id nobody registered is a problem. A
+     * parser that throws is recorded as a problem, not left to abort the validation.
+     */
+    private static Map<Identifier, Object> readExtensions(
+            Map<String, JsonElement> entries,
+            ContentBundle bundle,
+            Set<Identifier> npcIds,
+            Set<Identifier> graphIds,
+            DynamicOps<JsonElement> ops,
+            Problems problems) {
+        Map<Identifier, Object> extensions = new LinkedHashMap<>();
+        Map<Identifier, String> claimed = new HashMap<>();
+        for (Map.Entry<String, JsonElement> entry : entries.entrySet()) {
+            Identifier id = Identifier.tryParse(entry.getKey());
+            if (id == null) {
+                problems.add("bundle", "extensions key '" + entry.getKey() + "' is not a valid id");
+                continue;
+            }
+            if (!claim(claimed, id, entry.getKey(), "extensions", problems)) {
+                continue;
+            }
+            Optional<ContentExtensions.Registered<?>> registered = ContentExtensions.get(id);
+            if (registered.isEmpty()) {
+                problems.add("bundle", "extension " + id + " is not registered by any installed mod");
+                continue;
+            }
+            // A copy: the canonical JSON and digest are taken from the root after reading, so a parser that changed
+            // its section would change the revision that is stored.
+            parseExtension(registered.get(), id, entry.getValue().deepCopy(), bundle, npcIds, graphIds, ops, problems)
+                    .ifPresent(value -> extensions.put(id, value));
+        }
+        return extensions;
+    }
+
+    private static Optional<Object> parseExtension(
+            ContentExtensions.Registered<?> registered,
+            Identifier id,
+            JsonElement section,
+            ContentBundle bundle,
+            Set<Identifier> npcIds,
+            Set<Identifier> graphIds,
+            DynamicOps<JsonElement> ops,
+            Problems problems) {
+        String where = "extension " + id;
+        int mark = problems.count();
+        ExtensionContext context = new ExtensionContext() {
+            @Override
+            public Identifier id() {
+                return id;
+            }
+
+            @Override
+            public ContentBundle bundle() {
+                return bundle;
+            }
+
+            @Override
+            public Set<Identifier> npcIds() {
+                return npcIds;
+            }
+
+            @Override
+            public Set<Identifier> graphIds() {
+                return graphIds;
+            }
+
+            @Override
+            public DynamicOps<JsonElement> ops() {
+                return ops;
+            }
+
+            @Override
+            public void problem(String location, String message) {
+                problems.add(location, message);
+            }
+        };
+        Optional<?> value;
+        try {
+            value = registered.type().parse(section, context);
+        } catch (RuntimeException e) {
+            problems.add(where, "parsing failed with " + e);
+            return Optional.empty();
+        }
+        if (value == null || value.isEmpty()) {
+            if (problems.count() == mark) {
+                problems.add(where, "is invalid");
+            }
+            return Optional.empty();
+        }
+        if (!registered.key().valueClass().isInstance(value.get())) {
+            problems.add(where, "parser returned a " + value.get().getClass().getName() + ", not a "
+                    + registered.key().valueClass().getName());
+            return Optional.empty();
+        }
+        return Optional.of(value.get());
     }
 
     /**

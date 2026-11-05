@@ -349,6 +349,7 @@ provider choice, and a provider names its next node only at run time.
 | `bundle()` | the bundle being validated, not the active one |
 | `graphId()`, `nodeId()` | the graph and node that hold the spec |
 | `isFlagDeclared(FlagKey)` | whether the bundle's `flags` section declares that namespace and lists that flag |
+| `extension(ContentExtensionKey<T>)` | the bundle's parsed section of a registered extension, if it holds one |
 | `where()` | `<graph>#<node>: `, the prefix for error messages |
 
 A type that reads or writes flags should check `isFlagDeclared` at parse time, as the built-ins do. Nothing checks
@@ -395,6 +396,34 @@ Optional<String> next)`:
   entry with the same text at the same position. Return entries in a stable order, and keep their text stable between
   showing the node and the pick, or the pick only shows the node again.
 - `next` is the node entered afterwards. Empty ends the conversation, unless `onChoose` moved or ended it.
+
+### Bundle extensions
+
+A mod can keep its own content in the bundle, under the top-level `extensions` object, so it is validated, stored,
+activated and rolled back with the dialogue that uses it. Register the section's parser in `onInitialize`:
+
+```java
+public static final ContentExtensionKey<GuildContent> GUILD = ContentExtensions.register(
+        Identifier.fromNamespaceAndPath("example", "guild"), GuildContent.class, (section, context) -> {
+            // Report every problem with context.problem(...); return empty when the section is unusable.
+            return GuildContent.parse(section, context);
+        });
+```
+
+| `ExtensionContext` member | Gives |
+|---|---|
+| `id()` | the extension id |
+| `bundle()` | the bundle being validated, without extensions: flag namespaces, and the NPCs and graphs that parsed |
+| `npcIds()`, `graphIds()` | every NPC and graph id the bundle declares, including entries that failed to parse; check references against these |
+| `ops()` | the ops bundle text parses with; on a server they are `RegistryOps` over the server's registries |
+| `problem(where, message)`, `problem(message)` | records a problem; the second form is located at `extension <id>` |
+
+Sections are parsed after flags, NPCs and graphs, and before any condition, action or provider, so your dialogue types
+can check ids against your section through `ParseContext.extension(GUILD)`. A parser that throws is recorded as a
+problem. The parser gets a copy of its section, so changing it does not change the stored revision. A bundle that
+holds a section under an id nobody registered is refused. Read the active section with
+`HaruhiServices.content().active().extension(GUILD)`, and rebuild any index of it in an activation listener. The value
+should be immutable, because every reader of the active bundle shares it.
 
 ### Other services
 
@@ -534,6 +563,7 @@ src/main/java/town/lampas/haruhi/
   storage/                     HaruhiStorage, InMemoryStorage, PostgresStorage, StorageConfig, migrations runner
   content/                     bundle reading and validation, digest, revisions, startup load, /haruhi content
   content/model/               the immutable bundle records: ContentBundle, NpcProfile, DialogueGraph, ...
+  content/api/                 bundle extensions: ContentExtensions, ContentExtensionType, ExtensionContext
   dialogue/                    DialogueModule, DialogueSessions, DialogueConfig
   dialogue/api/                the extension API: DialogueRegistries, ParseContext, DialogueContext, types
   dialogue/builtin/            the built-in conditions and actions

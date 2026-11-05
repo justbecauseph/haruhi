@@ -118,6 +118,8 @@ class BundleSchemaTest {
                     choice(bundle).addProperty("when_unavailable", "grayed_out");
                     choice(bundle).addProperty("unavailable_message", "Not yet.");
                 }),
+                valid("a registered extension section", bundle ->
+                        bundle.add("extensions", element("{\"haruhi_test:ext\": {\"ids\": [\"a\"]}}"))),
                 valid("scale 4", bundle -> npc(bundle).addProperty("scale", 4)),
                 valid("scale 0.01", bundle -> npc(bundle).addProperty("scale", 0.01)),
                 valid("a provider choice", bundle ->
@@ -128,6 +130,7 @@ class BundleSchemaTest {
                 invalid("no schema", bundle -> bundle.remove("schema")),
                 invalid("an unknown top-level key", bundle -> bundle.add("npc", new JsonObject())),
                 invalid("flags as an array", bundle -> bundle.add("flags", new JsonArray())),
+                invalid("extensions as an array", bundle -> bundle.add("extensions", new JsonArray())),
                 invalid("an empty flag name", bundle -> flagNames(bundle).add("")),
                 invalid("a flag name with a NUL", bundle -> flagNames(bundle).add("a\u0000b")),
                 invalid("a flag namespace key that is not an id", bundle ->

@@ -67,7 +67,8 @@ A bundle is one JSON object:
   "schema": 1,
   "flags": { },
   "npcs": { },
-  "dialogues": { }
+  "dialogues": { },
+  "extensions": { }
 }
 ```
 
@@ -77,6 +78,7 @@ A bundle is one JSON object:
 | `flags` | no | Flag namespaces, each an id mapped to an array of flag names. See [Flags and visits](#flags-and-visits). |
 | `npcs` | no | NPC profiles, each an id mapped to a profile object. |
 | `dialogues` | no | Dialogue graphs, each an id mapped to a graph object. |
+| `extensions` | no | Sections owned by other mods, each an extension id mapped to that mod's section. Validation refuses an id that no installed mod registered. Each mod documents its own section. |
 
 Rules that apply everywhere in the file:
 

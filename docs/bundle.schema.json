@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Haruhi content bundle",
-  "description": "Schema 1 of the Haruhi content bundle, with the arguments of the built-in conditions and actions. It checks the shape of each value. /haruhi content validate also checks what this schema cannot: that every referenced node, graph and NPC exists, that every node is reachable, that every flag used is declared, that no two keys name the same id, that router weights add up to at most 2147483647, that condition, action and provider types from other mods are registered, and that haruhi:command commands are on the allowlist. The bundle accepts no $schema key, so map this schema to bundle files in the editor's settings.",
+  "description": "Schema 1 of the Haruhi content bundle, with the arguments of the built-in conditions and actions. It checks the shape of each value. /haruhi content validate also checks what this schema cannot: that every referenced node, graph and NPC exists, that every node is reachable, that every flag used is declared, that no two keys name the same id, that router weights add up to at most 2147483647, that condition, action and provider types from other mods are registered, that every extension id is registered and its owning mod accepts the section, and that haruhi:command commands are on the allowlist. The bundle accepts no $schema key, so map this schema to bundle files in the editor's settings.",
   "type": "object",
   "properties": {
     "schema": {
@@ -28,6 +28,11 @@
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/id" },
       "additionalProperties": { "$ref": "#/$defs/graph" }
+    },
+    "extensions": {
+      "description": "Sections owned by other mods, keyed by extension id. Each id must be registered by an installed mod, which validates its section. This schema checks only that each key is an id; a mod that registers an extension can publish a schema for its section.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" }
     }
   },
   "required": ["schema"],

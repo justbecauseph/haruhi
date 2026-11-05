@@ -9,9 +9,13 @@ import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.SharedConstants;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.Bootstrap;
+import town.lampas.haruhi.content.api.ContentExtensionKey;
+import town.lampas.haruhi.content.api.ContentExtensionType;
+import town.lampas.haruhi.content.api.ContentExtensions;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.dialogue.api.ChoiceProvider;
 import town.lampas.haruhi.dialogue.api.DialogueAction;
@@ -160,7 +164,84 @@ final class ContentTestSupport {
         return Identifier.parse(text);
     }
 
+    /**
+     * A test extension section: {@code {"ids": [string, ...]}}. Every other key, and every entry that is not a
+     * non-empty string, is a problem.
+     */
+    record TestSection(List<String> ids) {}
+
+    static final String EXTENSION = "haruhi_test:ext";
+    static final String THROWING_EXTENSION = "haruhi_test:throws";
+    static final String SILENT_EXTENSION = "haruhi_test:silent";
+    static final String WRONG_CLASS_EXTENSION = "haruhi_test:wrong_class";
+    static final String MUTATING_EXTENSION = "haruhi_test:mutates";
+    static final String GRAPH_REF_EXTENSION = "haruhi_test:graph_ref";
+    static ContentExtensionKey<TestSection> extensionKey;
+
+    private static void registerExtensions() {
+        extensionKey = ContentExtensions.register(id(EXTENSION), TestSection.class, (section, context) -> {
+            if (!section.isJsonObject()) {
+                context.problem("must be an object");
+                return Optional.empty();
+            }
+            List<String> ids = new ArrayList<>();
+            for (String key : section.getAsJsonObject().keySet()) {
+                if (!key.equals("ids")) {
+                    context.problem("unknown key '" + key + "'");
+                }
+            }
+            JsonElement list = section.getAsJsonObject().get("ids");
+            if (list != null && list.isJsonArray()) {
+                int index = 0;
+                for (JsonElement entry : list.getAsJsonArray()) {
+                    index++;
+                    if (JsonValues.isString(entry) && !entry.getAsString().isEmpty()) {
+                        ids.add(entry.getAsString());
+                    } else {
+                        context.problem("extension " + context.id() + ", ids entry " + index, "must be a non-empty string");
+                    }
+                }
+            }
+            return Optional.of(new TestSection(List.copyOf(ids)));
+        });
+        ContentExtensions.register(id(THROWING_EXTENSION), TestSection.class, (section, context) -> {
+            throw new IllegalStateException("boom");
+        });
+        // Returns nothing and reports nothing: the section must not vanish from a bundle that validates.
+        ContentExtensions.register(id(SILENT_EXTENSION), TestSection.class, (section, context) -> Optional.empty());
+        // Returns a value of another class than it registered, through a raw type.
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        ContentExtensionType<TestSection> wrongClass = (ContentExtensionType) (section, context) -> Optional.of("text");
+        ContentExtensions.register(id(WRONG_CLASS_EXTENSION), TestSection.class, wrongClass);
+        // Empties its section as it reads it.
+        ContentExtensions.register(id(MUTATING_EXTENSION), TestSection.class, (section, context) -> {
+            section.getAsJsonObject().entrySet().clear();
+            return Optional.of(new TestSection(List.of()));
+        });
+        // Reports when the "graph" key names no declared graph.
+        ContentExtensions.register(id(GRAPH_REF_EXTENSION), TestSection.class, (section, context) -> {
+            Identifier graph = id(section.getAsJsonObject().get("graph").getAsString());
+            if (!context.graphIds().contains(graph)) {
+                context.problem("graph " + graph + " is not declared");
+            }
+            return Optional.of(new TestSection(List.of()));
+        });
+        // Reads the test extension from the parse context, as a consumer's condition checks its own ids.
+        DialogueRegistries.registerCondition(id("haruhi_test:ext_id"), (args, context) -> {
+            String wanted = args.get("id").getAsString();
+            boolean known = context.extension(extensionKey).map(s -> s.ids().contains(wanted)).orElse(false);
+            if (!known) {
+                return DataResult.error(() -> context.where() + "id " + wanted + " is not in " + EXTENSION);
+            }
+            DialogueCondition always = ctx -> true;
+            return DataResult.success(always);
+        });
+    }
+
     private static void registerTypes() {
+        if (ContentExtensions.get(id(EXTENSION)).isEmpty()) {
+            registerExtensions();
+        }
         if (DialogueRegistries.condition(id("haruhi_test:always")).isEmpty()) {
             DialogueRegistries.registerCondition(id("haruhi_test:always"), (args, context) -> {
                 DialogueCondition always = ctx -> true;

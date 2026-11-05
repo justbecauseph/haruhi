@@ -57,7 +57,7 @@ with the reason, in your final message.
 
 - `Haruhi.java`, `api/HaruhiServices.java`, `client/HaruhiClient.java`
 - `storage/HaruhiStorage.java`, `FlagKey`, `FlagChange`, `VisitKey`, `VisitRecord`, `StoredRevision`, `RevisionSummary`
-- `content/ContentService.java`, `content/model/*`
+- `content/ContentService.java`, `content/model/*`, `content/api/*`
 - `dialogue/api/*`
 - `npc/NpcControl.java`
 - `network/*` (payload records and `HaruhiNetworking`)
@@ -165,6 +165,12 @@ Field rules (the content component enforces them, and other components rely on t
   - Two keys that parse to the same id (`guard` and `minecraft:guard`) are an error.
   - Router weights must sum to at most `Integer.MAX_VALUE`. Flag namespaces and names must be non-empty and contain
     no NUL character.
+- **Extensions:** the optional top-level `extensions` object maps an extension id to a section owned by another mod.
+  The mod registers a parser with `ContentExtensions.register(id, valueClass, type)` during its init. An id nobody
+  registered is an error. Sections are parsed after flags, NPCs and graphs and before any condition, action or
+  provider, which read the parsed values through `ParseContext.extension(key)`; the active bundle exposes them through
+  `ContentBundle.extension(key)`. The digest covers them. `docs/bundle.schema.json` checks only that `extensions` is
+  an object keyed by ids.
 - **Portrait:** the visual-novel screen shows a square headshot inside the text box, left of the speaker's name and the
   text: the node's `portrait`, else the speaking profile's `portrait` (resolved on the server and sent in the payload),
   stretched to the square, so portrait textures should be square; else a 3D render of the speaker entity's head and
