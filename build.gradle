@@ -1,5 +1,6 @@
 plugins {
 	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	id 'maven-publish'
 }
 
 version = project.mod_version
@@ -36,10 +37,12 @@ dependencies {
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	// GeckoLib renders NPC models on the client only. The pack ships it client side, so nothing outside
-	// town.lampas.haruhi.client may reference com.geckolib (ArchitectureTest enforces this). On the dev classpath for
-	// runClient and the GameTests.
+	// town.lampas.haruhi.client may reference com.geckolib (ArchitectureTest enforces this). localRuntime puts it on the
+	// dev classpath for runClient and the GameTests without publishing it as a dependency.
 	compileOnly "maven.modrinth:geckolib:${project.geckolib_version}"
-	runtimeOnly "maven.modrinth:geckolib:${project.geckolib_version}"
+	localRuntime "maven.modrinth:geckolib:${project.geckolib_version}"
+	// The client renderer's unit tests load GeckoLib classes; test configurations are not published either.
+	testRuntimeOnly "maven.modrinth:geckolib:${project.geckolib_version}"
 
 	// PostgreSQL storage adapter, nested in the jar.
 	implementation "org.postgresql:postgresql:${project.postgresql_version}"
@@ -102,6 +105,12 @@ processResources {
 	filesMatching("fabric.mod.json") {
 		expand "version": version
 	}
+
+	// The bundle schema ships in the jar as haruhi/bundle.schema.json, so a mod that builds on haruhi can check its
+	// own schema against the version it depends on.
+	from('docs/bundle.schema.json') {
+		into 'haruhi'
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -113,4 +122,74 @@ java {
 	withSourcesJar()
 	sourceCompatibility = JavaVersion.VERSION_25
 	targetCompatibility = JavaVersion.VERSION_25
+}
+
+// Published to the JustBecause Maven repository (https://github.com/justbecauseph/maven) by
+// .github/workflows/release.yml. Minecraft 26.2 is not obfuscated, so the jar is used as built:
+// implementation "town.lampas:haruhi:<version>" from https://raw.githubusercontent.com/justbecauseph/maven/main.
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			from components.java
+
+			groupId = project.maven_group.toString()
+			artifactId = project.archives_base_name.toString()
+			version = project.version.toString()
+
+			pom {
+				name = 'Haruhi'
+				description = 'Scriptable NPCs for Fabric: data-driven dialogue graphs, a visual-novel dialogue screen, Blockbench (GeckoLib) models and per-character dialogue flags.'
+				url = 'https://github.com/justbecauseph/haruhi'
+
+				licenses {
+					license {
+						name = 'Mozilla Public License 2.0'
+						url = 'https://www.mozilla.org/MPL/2.0/'
+					}
+				}
+
+				scm {
+					connection = 'scm:git:https://github.com/justbecauseph/haruhi.git'
+					developerConnection = 'scm:git:ssh://git@github.com/justbecauseph/haruhi.git'
+					url = 'https://github.com/justbecauseph/haruhi'
+				}
+
+				withXml {
+					// GeckoLib is compile-only (client side only) and must never reach a consumer's runtime classpath.
+					def dependenciesNode = asNode().dependencies[0]
+					if (dependenciesNode != null) {
+						dependenciesNode.dependency.each { dep ->
+							if (dep.artifactId.text() == 'geckolib') {
+								throw new GradleException('GeckoLib leaked into the publication POM')
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	repositories {
+		maven {
+			name = 'publicMaven'
+
+			// CI points this at a checkout of justbecauseph/maven. Locally, publishing falls back to build/public-maven.
+			url = uri(System.getenv('PUBLIC_MAVEN_REPO_DIR')
+					?: layout.buildDirectory.dir('public-maven').get().asFile)
+		}
+	}
+}
+
+// Gradle consumers read the module metadata rather than the POM, so it gets the same GeckoLib check.
+tasks.named('generateMetadataFileForMavenJavaPublication') {
+	doLast {
+		if (outputs.files.singleFile.text.contains('geckolib')) {
+			throw new GradleException('GeckoLib leaked into the publication module metadata')
+		}
+	}
+}
+
+// check generates both publication files, so ./gradlew build refuses a GeckoLib leak before any release does.
+tasks.named('check') {
+	dependsOn 'generatePomFileForMavenJavaPublication', 'generateMetadataFileForMavenJavaPublication'
 }

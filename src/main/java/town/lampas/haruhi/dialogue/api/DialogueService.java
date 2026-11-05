@@ -16,6 +16,15 @@ public interface DialogueService {
      */
     boolean open(ServerPlayer player, Identifier graphId, @Nullable Entity interlocutor);
 
+    /**
+     * Opens a graph of the active content tied to a place instead of an NPC, closing any conversation the player
+     * already has. The conversation ends when the player no longer {@linkplain DialogueAnchor#holds holds} the anchor,
+     * and a pick from outside it ends the conversation instead of running. A graph chained with {@code haruhi:open}
+     * keeps the anchor. Returns false, and leaves any current conversation open, if the graph does not exist in the
+     * active revision or the player does not hold the anchor now.
+     */
+    boolean openAt(ServerPlayer player, Identifier graphId, DialogueAnchor anchor);
+
     /** Ends the player's conversation, or cancels one still queued until their flags load. */
     void close(ServerPlayer player);
 

@@ -55,21 +55,26 @@ public final class GraphRunner {
             if (session.presented().isEmpty() && fresh.isEmpty()) {
                 return advance(session, null, node.get().source().next());
             }
-            return present(session, nodeId, node.get(), fresh);
+            return refused(present(session, nodeId, node.get(), fresh));
         }
         if (index < 0 || index >= session.presented().size() || index >= fresh.size()) {
-            return present(session, nodeId, node.get(), fresh);
+            return refused(present(session, nodeId, node.get(), fresh));
         }
         VisibleChoice sent = session.presented().get(index);
         VisibleChoice now = fresh.get(index);
         if (!now.enabled() || !sent.isSameChoice(now)) {
-            return present(session, nodeId, node.get(), fresh);
+            return refused(present(session, nodeId, node.get(), fresh));
         }
         RunContext context = RunContext.of(session, nodeId);
         if (!runAll(session, nodeId, now.actions(), context)) {
             return new Step.Ended();
         }
         return advance(session, context.transition(), now.next());
+    }
+
+    /** Marks a node shown again for a refused pick. */
+    private static Step refused(Step step) {
+        return step instanceof Step.Show show ? new Step.Show(show.node(), true) : step;
     }
 
     /** Enters a node: runs its on-enter actions, then routes it or presents it. Loops over routers and jumps. */

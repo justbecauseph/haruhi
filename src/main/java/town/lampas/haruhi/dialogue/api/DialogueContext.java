@@ -17,6 +17,11 @@ public interface DialogueContext {
     /** The entity the player is talking to, usually an NPC; empty for a conversation opened by a block or command. */
     Optional<Entity> interlocutor();
 
+    /** The place the conversation is tied to, for one opened with {@link DialogueService#openAt}; otherwise empty. */
+    default Optional<DialogueAnchor> anchor() {
+        return Optional.empty();
+    }
+
     Identifier graphId();
 
     /** The node being entered, or the node whose choice was picked. */

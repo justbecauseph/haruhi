@@ -19,6 +19,7 @@ import org.jspecify.annotations.Nullable;
 import town.lampas.haruhi.Haruhi;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.model.ContentBundle;
+import town.lampas.haruhi.dialogue.api.DialogueAnchor;
 import town.lampas.haruhi.dialogue.api.DialogueFlags;
 import town.lampas.haruhi.dialogue.api.DialogueService;
 import town.lampas.haruhi.dialogue.flags.CharacterCache;
@@ -58,7 +59,19 @@ public final class DialogueSessions implements DialogueService {
 
     @Override
     public boolean open(ServerPlayer player, Identifier graphId, @Nullable Entity interlocutor) {
-        return open(player, graphId, interlocutor, 0);
+        return open(player, graphId, new Ties(interlocutor, null), 0);
+    }
+
+    /**
+     * A player outside the anchor gets no conversation, whether or not their flags are loaded, so no on-enter action runs
+     * for a conversation the next tick would end.
+     */
+    @Override
+    public boolean openAt(ServerPlayer player, Identifier graphId, DialogueAnchor anchor) {
+        if (!Objects.requireNonNull(anchor, "anchor").holds(player)) {
+            return false;
+        }
+        return open(player, graphId, new Ties(null, anchor), 0);
     }
 
     /** Ends the player's conversation, including one still queued for their flags, which then never starts. */
@@ -97,7 +110,7 @@ public final class DialogueSessions implements DialogueService {
             return;
         }
         ServerPlayer owner = playerOf(session);
-        if (!isNear(owner, session.interlocutor())) {
+        if (!isNear(owner, Ties.of(session))) {
             endSession(owner, session);
             return;
         }
@@ -157,13 +170,13 @@ public final class DialogueSessions implements DialogueService {
     }
 
     /**
-     * Ends sessions whose player died or whose interlocutor is gone or too far, retries failed flag loads, and writes
-     * pending flags every 5 seconds.
+     * Ends sessions whose player died, whose interlocutor is gone or too far, or whose player left the anchor, retries
+     * failed flag loads, and writes pending flags every 5 seconds.
      */
     public void onTick(MinecraftServer server) {
         for (DialogueSession session : List.copyOf(sessions.values())) {
             ServerPlayer player = playerOf(session);
-            if (!player.isAlive() || !isNear(player, session.interlocutor())) {
+            if (!player.isAlive() || !isNear(player, Ties.of(session))) {
                 endSession(player, session);
             }
         }
@@ -188,7 +201,7 @@ public final class DialogueSessions implements DialogueService {
         }
     }
 
-    private boolean open(ServerPlayer player, Identifier graphId, @Nullable Entity interlocutor, int depth) {
+    private boolean open(ServerPlayer player, Identifier graphId, Ties ties, int depth) {
         if (depth > MAX_OPEN_CHAIN) {
             Haruhi.LOGGER.error("Dialogue {} would open past {} graphs in one step; not opened",
                     graphId, MAX_OPEN_CHAIN);
@@ -205,16 +218,17 @@ public final class DialogueSessions implements DialogueService {
         close(player);
         PlayerState state = stateOf(player);
         if (!state.cache.isLoaded()) {
-            state.pending = new PendingOpen(graphId, interlocutor);
+            state.pending = new PendingOpen(graphId, ties);
             ensureLoaded(state);
             return true;
         }
-        return start(state, player, bundle, graphId, interlocutor, depth);
+        return start(state, player, bundle, graphId, ties, depth);
     }
 
     /** Starts a loaded player's conversation: records the visit, then enters the start node. */
     private boolean start(PlayerState state, ServerPlayer player, ContentBundle bundle, Identifier graphId,
-            @Nullable Entity interlocutor, int depth) {
+            Ties ties, int depth) {
+        Entity interlocutor = ties.interlocutor();
         DataResult<CompiledGraph> compiledGraph = compiled.graph(bundle, graphId);
         Optional<CompiledGraph> graph = compiledGraph.result();
         if (graph.isEmpty()) {
@@ -230,8 +244,8 @@ public final class DialogueSessions implements DialogueService {
                 Haruhi.LOGGER.error("Could not record a visit to {} for {}", graphId, player.getUUID(), error);
             }
         });
-        DialogueSession session = new DialogueSession(nextSessionId(), player, interlocutor, bundle, graph.get(),
-                state.flags, visits, player.level().getRandom());
+        DialogueSession session = new DialogueSession(nextSessionId(), player, interlocutor, ties.anchor(), bundle,
+                graph.get(), state.flags, visits, player.level().getRandom());
         sessions.put(player.getUUID(), session);
         apply(player, session, runner.start(session), depth);
         return true;
@@ -243,10 +257,10 @@ public final class DialogueSessions implements DialogueService {
             return;
         }
         if (step instanceof Step.Show show) {
-            NodePresenter.show(player, session, show.node());
+            NodePresenter.show(player, session, show.node(), show.refusedPick());
         } else if (step instanceof Step.Opened opened) {
             endSession(player, session);
-            open(player, opened.graph(), session.interlocutor(), depth + 1);
+            open(player, opened.graph(), Ties.of(session), depth + 1);
         } else {
             endSession(player, session);
         }
@@ -309,11 +323,12 @@ public final class DialogueSessions implements DialogueService {
     }
 
     private void openPending(ServerPlayer player, PendingOpen pending) {
-        if (!isNear(player, pending.interlocutor())) {
-            Haruhi.LOGGER.debug("Dropped the queued open of {}: the interlocutor is gone or too far", pending.graph());
+        if (!isNear(player, pending.ties())) {
+            Haruhi.LOGGER.debug("Dropped the queued open of {}: the interlocutor is gone or too far, or the player "
+                    + "left the anchor", pending.graph());
             return;
         }
-        open(player, pending.graph(), pending.interlocutor(), 0);
+        open(player, pending.graph(), pending.ties(), 0);
     }
 
     private int nextSessionId() {
@@ -328,14 +343,19 @@ public final class DialogueSessions implements DialogueService {
         return HaruhiServices.npc().profileId(interlocutor).orElse(VisitKey.NO_NPC);
     }
 
-    /** Whether the interlocutor still stands where a conversation may go on: alive, in the same level, within 8 blocks. */
-    static boolean isNear(ServerPlayer player, @Nullable Entity interlocutor) {
-        if (interlocutor == null) {
-            return true;
-        }
-        return interlocutor.isAlive()
+    /**
+     * Whether a conversation may go on: an interlocutor is alive, in the player's level and within 8 blocks, and the
+     * player holds the anchor. A conversation tied to neither, from a command, always may.
+     */
+    static boolean isNear(ServerPlayer player, Ties ties) {
+        Entity interlocutor = ties.interlocutor();
+        if (interlocutor != null && !(interlocutor.isAlive()
                 && interlocutor.level() == player.level()
-                && player.distanceToSqr(interlocutor) <= MAX_DISTANCE_SQ;
+                && player.distanceToSqr(interlocutor) <= MAX_DISTANCE_SQ)) {
+            return false;
+        }
+        DialogueAnchor anchor = ties.anchor();
+        return anchor == null || anchor.holds(player);
     }
 
     private static ServerPlayer playerOf(DialogueSession session) {
@@ -362,5 +382,12 @@ public final class DialogueSessions implements DialogueService {
     }
 
     /** An open requested before the player's cache loaded. */
-    private record PendingOpen(Identifier graph, @Nullable Entity interlocutor) {}
+    private record PendingOpen(Identifier graph, Ties ties) {}
+
+    /** What a conversation is tied to: an interlocutor, an anchor, both, or neither. A chained open keeps them. */
+    record Ties(@Nullable Entity interlocutor, @Nullable DialogueAnchor anchor) {
+        static Ties of(DialogueSession session) {
+            return new Ties(session.interlocutor(), session.anchor());
+        }
+    }
 }

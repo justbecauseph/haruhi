@@ -1,0 +1,131 @@
+name: Publish
+
+# Publishes haruhi to the JustBecause Maven repository (justbecauseph/maven) when a GitHub release v<mod_version> is
+# published, or by hand for such a tag whose run failed. Modelled on justbecauseph/distant-decorations. Needs the
+# repository secret MAVEN_REPO_TOKEN: a token that can push to justbecauseph/maven.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag to publish to Maven, v<mod_version> (for a release whose run failed)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to Maven
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref }}
+
+    steps:
+      - name: Checkout haruhi
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 0
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5.7.0
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.3.0
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      # Both triggers publish only a tag v<mod_version>, so Maven never holds a version built from untagged code.
+      - name: Verify release version
+        shell: bash
+        run: |
+          MOD_VERSION="$(grep '^mod_version=' gradle.properties | cut -d= -f2)"
+          TAG="$(git describe --exact-match --tags HEAD 2>/dev/null || true)"
+          echo "Source ref:  $SOURCE_REF"
+          echo "Tag at HEAD: ${TAG:-none}"
+          echo "mod_version: $MOD_VERSION"
+          if [ "$SOURCE_REF" != "v$MOD_VERSION" ] || [ "$TAG" != "v$MOD_VERSION" ]; then
+            echo "::error::Only the tag v$MOD_VERSION can be published; $SOURCE_REF is not it"
+            exit 1
+          fi
+
+      # Unit tests (with Testcontainers PostgreSQL; the runner has Docker) and the server GameTests.
+      - name: Build and test
+        run: ./gradlew clean build
+
+      - name: Checkout public Maven repository
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: justbecauseph/maven
+          token: ${{ secrets.MAVEN_REPO_TOKEN }}
+          path: public-maven
+          fetch-depth: 0
+
+      # A published version is never replaced: consumers may already have cached it. A new release of a version that is
+      # already there fails, so the mismatch is seen; a manual rerun of a tag that did publish skips.
+      - name: Check Maven version
+        shell: bash
+        run: |
+          MOD_VERSION="$(grep '^mod_version=' gradle.properties | cut -d= -f2)"
+          VERSION_DIR="public-maven/town/lampas/haruhi/$MOD_VERSION"
+          if [ -d "$VERSION_DIR" ]; then
+            if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+              echo "::error::haruhi $MOD_VERSION is already in the Maven repository; bump mod_version for a new release"
+              exit 1
+            fi
+            echo "Maven version $MOD_VERSION already exists; Maven publication will be skipped."
+            echo "MAVEN_VERSION_EXISTS=true" >> "$GITHUB_ENV"
+          else
+            echo "MAVEN_VERSION_EXISTS=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Publish to public Maven repository
+        env:
+          PUBLIC_MAVEN_REPO_DIR: ${{ github.workspace }}/public-maven
+        shell: bash
+        run: |
+          if [ "$MAVEN_VERSION_EXISTS" = "true" ]; then
+            exit 0
+          fi
+          ./gradlew publishMavenJavaPublicationToPublicMavenRepository
+
+      - name: Commit public Maven repository
+        shell: bash
+        run: |
+          if [ "$MAVEN_VERSION_EXISTS" = "true" ]; then
+            exit 0
+          fi
+          MOD_VERSION="$(grep '^mod_version=' gradle.properties | cut -d= -f2)"
+          cd public-maven
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No Maven repository changes to commit."
+            exit 0
+          fi
+          git commit -m "Publish haruhi $MOD_VERSION"
+          # Other projects publish to the same repository, so its main may have moved since the checkout. Their files
+          # are in other directories, so a rebase onto theirs is clean.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt); rebasing onto the repository's main and retrying."
+            sleep $((attempt * 5))
+            git pull --rebase origin main
+          done
+          echo "::error::Could not push to justbecauseph/maven after 5 attempts"
+          exit 1

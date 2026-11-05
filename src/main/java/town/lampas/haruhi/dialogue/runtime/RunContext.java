@@ -5,6 +5,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import town.lampas.haruhi.content.model.ContentBundle;
+import town.lampas.haruhi.dialogue.api.DialogueAnchor;
 import town.lampas.haruhi.dialogue.api.DialogueContext;
 import town.lampas.haruhi.dialogue.api.DialogueFlags;
 
@@ -39,6 +40,11 @@ final class RunContext implements DialogueContext {
     @Override
     public Optional<Entity> interlocutor() {
         return Optional.ofNullable(session.interlocutor());
+    }
+
+    @Override
+    public Optional<DialogueAnchor> anchor() {
+        return Optional.ofNullable(session.anchor());
     }
 
     @Override

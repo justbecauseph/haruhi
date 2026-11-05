@@ -314,6 +314,25 @@
           "text": "The last link."
         }
       }
+    },
+    "haruhi:fixture/score": {
+      "start": "show",
+      "nodes": {
+        "show": {
+          "text": [
+            "Score: ", { "score": { "name": "@s", "objective": "haruhi_fixture_score" } },
+            " / ", { "score": { "name": "@e[tag=haruhi_fixture_pair]", "objective": "haruhi_fixture_score" } }
+          ],
+          "choices": [
+            { "text": ["Spend ", { "score": { "name": "@s", "objective": "haruhi_fixture_score" } }], "next": "bye" },
+            { "text": "Vault", "next": "bye",
+              "only_if": [ { "type": "haruhi:permission", "level": 4 } ],
+              "when_unavailable": "grayed_out",
+              "unavailable_message": ["Need more than ", { "score": { "name": "@s", "objective": "haruhi_fixture_score" } }] }
+          ]
+        },
+        "bye": { "text": "Spent." }
+      }
     }
   }
 }

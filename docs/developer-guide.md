@@ -94,8 +94,10 @@ next start begins clean.
 - Code that refers to `net.minecraft.client` or `com.geckolib` lives under `town.lampas.haruhi.client`.
   `ArchitectureTest` reads every compiled main class outside that package and fails the build if its constant pool
   names either prefix. The Lampas server does not ship GeckoLib, and a dedicated server has no client classes.
-- GeckoLib is `compileOnly` and `runtimeOnly` in `build.gradle`: the dev runs and GameTests have it, the jar does not
-  depend on it, and `fabric.mod.json` only recommends it.
+- GeckoLib is `compileOnly` (to compile the client package), `localRuntime` (for `runClient`, `runServer` and
+  `runGameTest`) and `testRuntimeOnly` (for the unit tests) in `build.gradle`. None of these reaches the published
+  POM or Gradle module metadata, so the jar does not depend on it, and `fabric.mod.json` only recommends it. Do not
+  use `runtimeOnly`, which would publish it: `check` fails if GeckoLib appears in either file.
 - Inside the client package, only `client.npc.gecko` refers to GeckoLib classes. `NpcClient` calls into it after
   `FabricLoader.isModLoaded("geckolib")`, so those classes never load without GeckoLib. `ArchitectureTest` does not
   check this inner boundary; keep it by hand.
@@ -219,10 +221,31 @@ registers conditions and actions under the `haruhi` namespace and no providers.
 
 ### Depending on Haruhi
 
-There is no published artifact. Build Haruhi (see [Building and testing](#building-and-testing)), put
-`build/libs/haruhi-0.1.0.jar` on your project's classpath, and declare `"depends": { "haruhi": "*" }` in your
-`fabric.mod.json`. This repository does not show the Gradle configuration a consumer should use for the jar; the
-setup has not been verified here.
+Haruhi releases are published to the JustBecause Maven repository
+([justbecauseph/maven](https://github.com/justbecauseph/maven)) as `town.lampas:haruhi`, by the release workflow
+(`.github/workflows/release.yml`) when a GitHub release `v<mod_version>` is published. Minecraft 26.2 is not
+obfuscated, so a plain `implementation` dependency on the jar works with Loom:
+
+```groovy
+repositories {
+    maven {
+        url = 'https://raw.githubusercontent.com/justbecauseph/maven/main'
+        content { includeGroup 'town.lampas' }
+    }
+}
+
+dependencies {
+    implementation "town.lampas:haruhi:0.1.0"
+}
+```
+
+Declare `"depends": { "haruhi": ">=0.1.0" }` in your `fabric.mod.json`. To build against a haruhi checkout instead,
+for a change that is not published yet, add `includeBuild('../haruhi')` to your `settings.gradle`: Gradle substitutes
+the dependency with that build. [Alina](https://github.com/justbecauseph/alina) does both, and builds against the
+published jar when no checkout sits beside it.
+
+The jar also holds the bundle schema as `haruhi/bundle.schema.json`, so a mod that publishes a schema for its own
+bundle extension can check it against the haruhi version it depends on.
 
 The API is in `town.lampas.haruhi.dialogue.api`. It also uses `ContentBundle` and `FlagNamespace` from
 `town.lampas.haruhi.content.model` and `FlagKey` from `town.lampas.haruhi.storage`.
@@ -364,6 +387,7 @@ and only on the server thread.
 |---|---|
 | `player()` | the `ServerPlayer` in the conversation |
 | `interlocutor()` | the entity the player talks to; empty for a conversation opened by a command or block |
+| `anchor()` | the `DialogueAnchor` of a conversation opened with `openAt`; empty otherwise |
 | `graphId()`, `nodeId()` | the graph, and the node being entered or whose choice was picked |
 | `content()` | the bundle the conversation runs on |
 | `flags()` | the player's `DialogueFlags`: `get`, `isSet`, `set`, `add`, `clear` on a `FlagKey(namespace, flag)` |
@@ -396,6 +420,10 @@ Optional<String> next)`:
   entry with the same text at the same position. Return entries in a stable order, and keep their text stable between
   showing the node and the pick, or the pick only shows the node again.
 - `next` is the node entered afterwards. Empty ends the conversation, unless `onChoose` moved or ended it.
+- `text` and `unavailableReason` are sent as given. Bundle text is resolved for the player at gamemaster permission
+  (see the content guide), but entry text is not, because a provider may build it from player-made text such as an
+  item's custom name, and resolving that at gamemaster permission would let a player read other players' data. If an
+  entry needs a score or selector, resolve it in the provider at a permission you choose.
 
 ### Bundle extensions
 
@@ -430,6 +458,7 @@ should be immutable, because every reader of the active bundle shares it.
 | Call | Does |
 |---|---|
 | `HaruhiServices.dialogue().open(player, graphId, interlocutor)` | opens a graph of the active content; `interlocutor` may be null. Returns false when the graph is not in the active content. Closes the player's current conversation. |
+| `HaruhiServices.dialogue().openAt(player, graphId, anchor)` | opens a graph tied to a place: a `DialogueAnchor(dimension, position, maxDistance)`, with `maxDistance` above 0 and at most 64 blocks. The conversation ends when the player changes dimension or moves farther than `maxDistance` from `position`, and a pick sent from farther away ends it without running. A graph chained with `haruhi:open` keeps the anchor. Use it for a block such as a notice board. |
 | `HaruhiServices.dialogue().close(player)` | ends the conversation, or cancels one waiting for the player's flags |
 | `HaruhiServices.dialogue().isInDialogue(player)` | true while a conversation is open or waiting for flags |
 | `HaruhiServices.content().active()` | the active `ContentBundle`; `ContentBundle.EMPTY` before any is active |
@@ -522,7 +551,8 @@ editing any of them reruns the tests.
 ### PostgreSQL tests and Docker
 
 `PostgresStorageTest` runs the storage contract, the migrations, the privilege cases, the unique index, concurrent
-activations from two storages and the socket timeout against a `postgres:18.4` container through Testcontainers. It is
+activations from two storages, the socket timeout and server limits every pooled connection carries, and lock waits that
+fail on the server's `lock_timeout` without committing, against a `postgres:18.4` container through Testcontainers. It is
 annotated `@Testcontainers(disabledWithoutDocker = true)`, so without a running Docker daemon its tests are reported as
 skipped and `build` still passes. Check the test report to see whether they ran.
 

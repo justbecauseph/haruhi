@@ -48,6 +48,8 @@ import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.world.clock.ServerClockManager;
 import net.minecraft.world.clock.WorldClock;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -57,7 +59,12 @@ import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.dialogue.DialogueConfig;
 import town.lampas.haruhi.dialogue.DialogueModule;
 import town.lampas.haruhi.dialogue.DialogueSessions;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import town.lampas.haruhi.dialogue.api.DialogueAction;
+import town.lampas.haruhi.dialogue.api.DialogueAnchor;
 import town.lampas.haruhi.dialogue.api.DialogueCondition;
 import town.lampas.haruhi.dialogue.api.DialogueContext;
 import town.lampas.haruhi.dialogue.api.DialogueFlags;
@@ -623,6 +630,172 @@ public final class DialogueGameTests {
                             "the chain stopped at its limit and no conversation is left open");
                 })
                 .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void anAnchoredConversationEndsWhenThePlayerWalksAway(GameTestHelper helper) {
+        Subject subject = new Subject();
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    DialogueAnchor anchor = anchorAtPlayer(subject.player, 4.0);
+                    DialogueSession session = openAtNow(helper, subject.player, CLERK, anchor);
+                    helper.assertValueEqual(session.anchor(), anchor, "the session keeps the anchor it was opened at");
+                    helper.assertTrue(session.interlocutor() == null, "an anchored conversation has no interlocutor");
+                    Vec3 start = subject.player.position();
+                    subject.player.setPos(start.x + 3.0, start.y, start.z);
+                })
+                .thenIdle(2)
+                .thenExecute(() -> {
+                    helper.assertTrue(sessions().isInDialogue(subject.player),
+                            "three blocks away is within the four-block anchor");
+                    Vec3 here = subject.player.position();
+                    subject.player.setPos(here.x + 3.0, here.y, here.z);
+                })
+                .thenWaitUntil(() -> helper.assertFalse(sessions().isInDialogue(subject.player),
+                        "six blocks away is past the anchor, so the tick ends the conversation"))
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aPickFromOutsideTheAnchorEndsTheConversationInsteadOfRunning(GameTestHelper helper) {
+        Subject subject = new Subject();
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    DialogueSession session = openAtNow(helper, subject.player, CLERK, anchorAtPlayer(subject.player, 4.0));
+                    int tellMeMore = indexOf(helper, session, TELL_ME_MORE);
+                    Vec3 start = subject.player.position();
+                    // Moved and picked in the same step, before any tick could end the conversation.
+                    subject.player.setPos(start.x + 10.0, start.y, start.z);
+                    sessions().choose(subject.player, session.id(), "greet", tellMeMore);
+                    helper.assertFalse(sessions().isInDialogue(subject.player),
+                            "a pick from outside the anchor ends the conversation");
+                    helper.assertValueEqual(flagsOf(helper, subject.player).get(MET), 0,
+                            "the picked entry did not run, so met is still unset");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void nodeAndChoiceTextIsResolvedForThePlayerWhenSent(GameTestHelper helper) {
+        Subject subject = new Subject();
+        Identifier scoreGraph = Identifier.fromNamespaceAndPath("haruhi", "fixture/score");
+        helper.startSequence()
+                .thenWaitUntil(() -> requireStartupComplete(helper))
+                .thenExecute(() -> subject.client = joinClient(helper, UUID.randomUUID()))
+                .thenWaitUntil(() -> flagsOf(helper, subject.client.player()))
+                .thenExecute(() -> {
+                    ServerPlayer player = subject.client.player();
+                    Scoreboard scoreboard = helper.getLevel().getServer().getScoreboard();
+                    Objective objective = scoreboard.getObjective("haruhi_fixture_score");
+                    if (objective == null) {
+                        objective = scoreboard.addObjective("haruhi_fixture_score", ObjectiveCriteria.DUMMY,
+                                Component.literal("Fixture score"), ObjectiveCriteria.RenderType.INTEGER, false, null);
+                    }
+                    scoreboard.getOrCreatePlayerScore(player, objective).set(7);
+                    // Two entities match the second score's name, so that part cannot resolve; the rest still must.
+                    List<Entity> pair = List.of(
+                            helper.spawn(EntityTypes.ARMOR_STAND, new BlockPos(1, 2, 1)),
+                            helper.spawn(EntityTypes.ARMOR_STAND, new BlockPos(2, 2, 1)));
+                    pair.forEach(stand -> stand.addTag("haruhi_fixture_pair"));
+                    subject.client.dialogsSent();
+
+                    DialogueSession session = openNow(helper, sessions(), player, scoreGraph);
+                    MultiActionDialog menu = onlyChoiceDialog(helper, subject.client.dialogsSent(), "Score: 7 / ");
+                    helper.assertValueEqual(menu.actions().get(0).button().label().getString(), "Spend 7",
+                            "the choice label shows the player's score");
+                    helper.assertValueEqual(menu.actions().get(1).button().tooltip().map(Component::getString),
+                            Optional.of("Need more than 7"), "the grayed-out choice's unavailable message");
+                    helper.assertValueEqual(session.presented().get(0).text().getString(), "Spend ",
+                            "the session keeps the text as written, so a changed score cannot break the pick");
+
+                    scoreboard.getOrCreatePlayerScore(player, objective).set(9);
+                    sessions().choose(player, session.id(), "show", 0);
+                    presentedAt(helper, player, "bye");
+                    sessions().close(player);
+                    pair.forEach(stand -> stand.discard());
+                    scoreboard.removeObjective(objective);
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 40)
+    public void openAtRefusesAPlayerOutsideTheAnchor(GameTestHelper helper) {
+        Subject subject = new Subject();
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    Vec3 here = subject.player.position();
+                    DialogueAnchor elsewhere = new DialogueAnchor(subject.player.level().dimension(),
+                            new Vec3(here.x + 10.0, here.y, here.z), 4.0);
+                    activateFixture(helper);
+                    helper.assertFalse(sessions().openAt(subject.player, CLERK, elsewhere),
+                            "a player ten blocks from a four-block anchor gets no conversation");
+                    helper.assertFalse(sessions().isInDialogue(subject.player), "nothing was started or queued");
+                    helper.assertValueEqual(flagsOf(helper, subject.player).get(MET), 0, "no on-enter action ran");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aGraphChainedWithOpenKeepsTheAnchor(GameTestHelper helper) {
+        Subject subject = new Subject();
+        Identifier chainEight = Identifier.fromNamespaceAndPath("haruhi", "fixture/chain8");
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    DialogueAnchor anchor = anchorAtPlayer(subject.player, 4.0);
+                    activateFixture(helper);
+                    helper.assertTrue(sessions().openAt(subject.player, chainEight, anchor), "chain8 should open");
+                    DialogueSession session = sessions().session(subject.player).orElseThrow();
+                    helper.assertValueEqual(session.graphId(),
+                            Identifier.fromNamespaceAndPath("haruhi", "fixture/chain9"), "chain8 opened chain9 as it entered");
+                    helper.assertValueEqual(session.anchor(), anchor, "the chained conversation keeps the anchor");
+                    sessions().close(subject.player);
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aQueuedOpenAtIsDroppedWhenThePlayerLeftTheAnchorBeforeTheFlagsLoaded(GameTestHelper helper) {
+        HeldStorage storage = new HeldStorage(HaruhiServices.storage(), "loadVisits");
+        DialogueSessions held = new DialogueSessions(new CharacterStore(storage::storage));
+        Subject subject = new Subject();
+        helper.startSequence()
+                .thenWaitUntil(() -> requireStartupComplete(helper))
+                .thenExecute(() -> {
+                    subject.player = helper.makeMockServerPlayerInLevel();
+                    activateFixture(helper);
+                    helper.assertTrue(held.openAt(subject.player, CLERK, anchorAtPlayer(subject.player, 4.0)),
+                            "the open is accepted and queued while the flags load");
+                    helper.assertTrue(held.session(subject.player).isEmpty(), "the load is held, so nothing started");
+                    Vec3 here = subject.player.position();
+                    subject.player.setPos(here.x + 10.0, here.y, here.z);
+                })
+                .thenWaitUntil(() -> helper.assertTrue(storage.answered(), "storage answered the held load"))
+                .thenExecute(() -> {
+                    activateFixture(helper);
+                    storage.release();
+                })
+                .thenWaitUntil(() -> helper.assertTrue(held.loadedFlags(subject.player).isPresent(), "the flags loaded"))
+                .thenIdle(2)
+                .thenExecute(() -> {
+                    helper.assertTrue(held.session(subject.player).isEmpty(),
+                            "the queued open was dropped: the player had left the anchor");
+                    held.onLeave(subject.player);
+                })
+                .thenSucceed();
+    }
+
+    private static DialogueAnchor anchorAtPlayer(ServerPlayer player, double maxDistance) {
+        return new DialogueAnchor(player.level().dimension(), player.position(), maxDistance);
+    }
+
+    /** {@link #openNow} for an anchored conversation. */
+    private static DialogueSession openAtNow(GameTestHelper helper, ServerPlayer player, Identifier graph,
+            DialogueAnchor anchor) {
+        activateFixture(helper);
+        helper.assertTrue(sessions().openAt(player, graph, anchor), "the fixture graph " + graph + " should open");
+        Optional<DialogueSession> session = sessions().session(player);
+        helper.assertTrue(session.isPresent(), "the flags were loaded, so " + graph + " started in this step");
+        return session.get();
     }
 
     /** Waits for the startup activation, joins a mock player, and waits until the module has loaded its flags. */

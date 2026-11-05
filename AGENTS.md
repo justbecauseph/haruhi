@@ -36,6 +36,12 @@ The Guild itself is a later consumer and is not in this repository.
   Gradle cache under `maven.modrinth/geckolib`.
 - `../lampas-addons` is a working 26.2 Fabric mod with payloads, commands, GameTests and entity code. Read it for
   idioms; do not change it.
+- **Publishing:** `.github/workflows/release.yml` publishes `town.lampas:haruhi` to the JustBecause Maven repository
+  (`justbecauseph/maven`) when a GitHub release `v<mod_version>` is published, after `./gradlew clean build` passes. A
+  version already in that repository is never replaced, so bump `mod_version` for every release. Locally,
+  `./gradlew publishMavenJavaPublicationToPublicMavenRepository` writes to `build/public-maven`. Dev-only runtime
+  dependencies go in `localRuntime`, never `runtimeOnly`, which would publish them to consumers; `check` fails if
+  GeckoLib reaches the POM or the Gradle module metadata.
 
 ## Architecture
 
@@ -43,7 +49,7 @@ The Guild itself is a later consumer and is not in this repository.
 |---|---|---|---|
 | storage | `town.lampas.haruhi.storage` (except the contract files below), `src/main/resources/haruhi/migrations/` | `StorageModule`, config `config/haruhi.json`, in-memory and PostgreSQL (`HikariCP`, versioned SQL migrations) implementations of `HaruhiStorage` | nothing |
 | content | `town.lampas.haruhi.content` (except the contract files), `src/main/resources/haruhi/seed_bundle.json` | `ContentModule`: JSON codecs for the bundle format below, full validation, SHA-256 digest, revisions through `HaruhiStorage`, activation on startup, `/haruhi content` commands | storage (interface), `DialogueRegistries` for parsing specs |
-| dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` | `DialogueModule`: sessions, graph runtime, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
+| dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` | `DialogueModule`: sessions (tied to an NPC or, through `openAt`, to a place), graph runtime, node text resolved for the player when sent, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
 | npc and client | `town.lampas.haruhi.npc` (except `NpcControl`), `town.lampas.haruhi.client` (except `HaruhiClient`), `assets/haruhi/**` | `NpcModule`: entity type, profile and look syncing, interaction, `/haruhi npc` commands, `NpcControl`. `NpcClient`: GeckoLib replaced-entity renderer, vanilla player-model fallback, default humanoid model and animations, animation payload receiver. `DialogueClient`: the visual-novel screen; while it is open, `DialogueHud` hides the vanilla HUD elements under its box (hotbar, status bars, experience bar and level, held-item name, crosshair) and moves the chat above the box | content (`ContentService`), dialogue (`DialogueService`), the payloads |
 
 Initialisation order, in `Haruhi.onInitialize`: payload types, storage, content, dialogue, npc. A module may read the
@@ -61,7 +67,7 @@ with the reason, in your final message.
 - `dialogue/api/*`
 - `npc/NpcControl.java`
 - `network/*` (payload records and `HaruhiNetworking`)
-- `build.gradle`, `gradle.properties`, `settings.gradle`, `src/main/resources/fabric.mod.json`, both mixin configs, `src/gametest/resources/fabric.mod.json`, `src/test/java/town/lampas/haruhi/ArchitectureTest.java`
+- `build.gradle`, `gradle.properties`, `settings.gradle`, `.github/workflows/release.yml`, `src/main/resources/fabric.mod.json`, both mixin configs, `src/gametest/resources/fabric.mod.json`, `src/test/java/town/lampas/haruhi/ArchitectureTest.java`
 
 Each component writes its GameTests in its own class, already listed in the GameTest entrypoints:
 `town.lampas.haruhi.gametest.{Storage,Content,Npc,Dialogue}GameTests`. Each also adds unit tests under

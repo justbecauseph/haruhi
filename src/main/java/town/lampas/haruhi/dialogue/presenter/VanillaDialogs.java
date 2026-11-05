@@ -49,10 +49,11 @@ public final class VanillaDialogs {
 
     private VanillaDialogs() {}
 
-    static void show(ServerPlayer player, DialogueSession session, PresentedNode presented) {
+    static void show(ServerPlayer player, DialogueSession session, PresentedNode presented, TextResolver resolver) {
         Speaker speaker = Speaker.of(session, presented.node());
-        Component title = speaker.name().getString().isEmpty() ? Component.literal("Dialogue") : speaker.name();
-        Component text = presented.node().text().orElse(Component.empty());
+        Component name = resolver.resolve(speaker.name());
+        Component title = name.getString().isEmpty() ? Component.literal("Dialogue") : name;
+        Component text = resolver.resolve(presented.node().text().orElse(Component.empty()));
         List<DialogBody> body = List.of(new PlainMessage(text, PlainMessage.DEFAULT_WIDTH));
         String node = presented.node().id();
 
@@ -68,7 +69,7 @@ public final class VanillaDialogs {
             CommonDialogData common = new CommonDialogData(title, Optional.empty(), true, false, WAIT, body, List.of());
             List<ActionButton> buttons = new ArrayList<>(presented.choices().size());
             for (int index = 0; index < presented.choices().size(); index++) {
-                buttons.add(choiceButton(session, node, index, presented.choices().get(index)));
+                buttons.add(choiceButton(session, node, index, presented.choices().get(index), resolver));
             }
             ActionButton exit = new ActionButton(
                     new CommonButtonData(CommonComponents.GUI_CANCEL, CommonButtonData.DEFAULT_WIDTH),
@@ -104,10 +105,11 @@ public final class VanillaDialogs {
      * One choice button. Every button carries the click, grayed out or not: a button with no action makes the client wait
      * for a response that never comes.
      */
-    static ActionButton choiceButton(DialogueSession session, String node, int index, VisibleChoice choice) {
+    static ActionButton choiceButton(
+            DialogueSession session, String node, int index, VisibleChoice choice, TextResolver resolver) {
         CommonButtonData data = new CommonButtonData(
-                choice.text(),
-                choice.enabled() ? Optional.empty() : choice.unavailableReason(),
+                resolver.choiceText(choice),
+                choice.enabled() ? Optional.empty() : resolver.choiceReason(choice),
                 CommonButtonData.DEFAULT_WIDTH);
         return new ActionButton(data, Optional.<Action>of(click(CHOICE_CLICK, session.id(), node, index)));
     }

@@ -33,7 +33,8 @@ class VanillaDialogsTest {
         DialogueSession session = new DialogueSession(7, null, null, ContentBundle.EMPTY, null, null, 1, null);
 
         for (VisibleChoice choice : List.of(choice(0, true), choice(1, false))) {
-            ClickEvent.Custom click = clickOf(VanillaDialogs.choiceButton(session, "menu", choice.choiceIndex(), choice));
+            ClickEvent.Custom click = clickOf(VanillaDialogs.choiceButton(session, "menu", choice.choiceIndex(), choice,
+                    TextResolver.AS_WRITTEN));
 
             assertEquals(VanillaDialogs.CHOICE_CLICK, click.id());
             CompoundTag payload = (CompoundTag) click.payload().orElseThrow();

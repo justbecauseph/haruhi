@@ -88,6 +88,12 @@ Rules that apply everywhere in the file:
 - Node ids are plain strings and only need to be unique inside their graph.
 - Text fields take Minecraft's text component JSON: a plain string such as `"Hello."`, or a component object such as
   `{"text": "Hello.", "color": "gold"}`.
+- Node text, choice text, unavailable messages and speaker names are resolved for the player each time a node is
+  shown, as sign text is: `{"score": {"name": "@s", "objective": "coins"}}` shows the player's own score, a
+  `selector` component lists the entities it matches, and an `nbt` component shows the data it names. Each part of a
+  text resolves on its own: a part that cannot be resolved is sent as written, and a `score` whose name does not match
+  exactly one entity shows nothing. Selector and nbt components run each time the node is shown, so keep their
+  selectors narrow. The entries of a choice provider are shown as the providing mod gives them, unresolved.
 - Keys are snake_case, and an unknown key is an error at every level: bundle, NPC, graph, node, choice, router branch
   and the arguments of every condition and action. A misspelt `only_if` fails validation instead of silently removing
   a gate.
