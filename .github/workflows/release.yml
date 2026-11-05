@@ -1,8 +1,9 @@
 name: Publish
 
 # Publishes haruhi to the JustBecause Maven repository (justbecauseph/maven) when a GitHub release v<mod_version> is
-# published, or by hand for such a tag whose run failed. Modelled on justbecauseph/distant-decorations. Needs the
-# repository secret MAVEN_REPO_TOKEN: a token that can push to justbecauseph/maven.
+# published, or by hand for such a tag whose run failed. Modelled on justbecauseph/distant-decorations. Uses the
+# justbecauseph organization secret MAVEN_REPO_TOKEN, a token that can push to justbecauseph/maven, which the
+# organization shares with this repository.
 
 on:
   release:
