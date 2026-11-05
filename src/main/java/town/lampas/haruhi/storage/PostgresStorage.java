@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -28,7 +29,8 @@ import net.minecraft.resources.Identifier;
 final class PostgresStorage implements HaruhiStorage {
     /**
      * How long one read from the server may wait before the connection fails. A server that stops answering otherwise
-     * holds its thread and connection forever. A {@code socketTimeout} in the {@code jdbc_url} overrides this.
+     * holds its thread and connection forever. A {@code socketTimeout} in the {@code jdbc_url} replaces this, and the
+     * server limits follow the value that the URL gives. See {@link PostgresConnectionSettings}.
      */
     private static final int SOCKET_TIMEOUT_SECONDS = 10;
     private static final String LOCK_ACTIVATIONS = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
@@ -72,9 +74,10 @@ final class PostgresStorage implements HaruhiStorage {
         if (!StorageSupport.isSchemaName(schema)) {
             throw new IllegalArgumentException("Schema name " + schema + " is not a lowercase identifier");
         }
+        PostgresConnectionSettings connection = PostgresConnectionSettings.of(jdbcUrl, SOCKET_TIMEOUT_SECONDS);
         this.schema = schema;
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(jdbcUrl);
+        config.setJdbcUrl(connection.jdbcUrl());
         config.setUsername(username);
         config.setPassword(password);
         config.setSchema(schema);
@@ -83,6 +86,10 @@ final class PostgresStorage implements HaruhiStorage {
         // Driver defaults. The PostgreSQL driver gives a URL parameter of the same name priority over these.
         config.addDataSourceProperty("socketTimeout", String.valueOf(SOCKET_TIMEOUT_SECONDS));
         config.addDataSourceProperty("tcpKeepAlive", "true");
+        // Startup parameters of every connection: a lock wait or a long statement fails on the server before
+        // socketTimeout fires, while the server answers. When the URL has options of its own, connection.jdbcUrl()
+        // carries them too.
+        config.addDataSourceProperty("options", connection.options());
         this.dataSource = new HikariDataSource(config);
         this.executor = new StorageExecutor(poolSize, "haruhi-storage-", StorageSupport.SHUTDOWN_GRACE);
     }
@@ -98,6 +105,24 @@ final class PostgresStorage implements HaruhiStorage {
             throw new IllegalStateException(
                     "Haruhi storage could not migrate schema " + schema + ": " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The socket read timeout and the server limits of one pooled connection, read through the storage's own executor
+     * and pool. For tests: the socket read timeout in milliseconds, then the server's lock_timeout and statement_timeout
+     * as the server shows them.
+     */
+    record SessionLimits(int networkTimeoutMillis, String lockTimeout, String statementTimeout) {}
+
+    CompletableFuture<SessionLimits> sessionLimits() {
+        return query(connection -> {
+            try (Statement statement = connection.createStatement();
+                    ResultSet row = statement.executeQuery(
+                            "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')")) {
+                row.next();
+                return new SessionLimits(connection.getNetworkTimeout(), row.getString(1), row.getString(2));
+            }
+        });
     }
 
     @Override

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -23,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -30,8 +33,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * Runs the storage contract against {@link PostgresStorage} on a PostgreSQL container, plus checks that only the
- * database can show: migrations, the schema they land in, privileges, the unique index, and locking between
- * sessions. Skipped when Docker is not running.
+ * database can show: migrations, the schema they land in, privileges, the unique index, locking between sessions, and
+ * a write or read that waits on a lock. Skipped when Docker is not running.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class PostgresStorageTest extends HaruhiStorageContractTest {
@@ -39,6 +42,9 @@ class PostgresStorageTest extends HaruhiStorageContractTest {
     private static final Instant T1 = Instant.parse("2026-11-04T10:01:00Z");
     private static final Instant T2 = Instant.parse("2026-11-04T10:02:00Z");
     private static final FlagKey MET = new FlagKey("haruhi:example/greeter", "met");
+    private static final UUID ALICE = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    private static final VisitKey GREETER = new VisitKey(
+            Identifier.parse("haruhi:example/greeter"), Identifier.parse("haruhi:example/greeter_npc"));
     private static final String BUNDLE = "{\"schema\":1}";
     private static final String ROLE_PASSWORD = "secret";
     /** Longer than any socket timeout the storage sets, so a read that gets an answer finishes first. */
@@ -189,27 +195,143 @@ class PostgresStorageTest extends HaruhiStorageContractTest {
         }
     }
 
+    /** A read that waits on a lock fails on the server's lock_timeout (55P03), not on the client's socket timeout. */
     @Test
-    void aQueryThatGetsNoAnswerFailsInsteadOfHangingItsCaller() throws SQLException {
+    void aReadThatWaitsOnALockFailsOnTheServersLockTimeout() throws SQLException {
         String schema = newSchema();
         try (PostgresStorage storage = open(schema)) {
             storage.migrate();
             try (Connection blocker = connect()) {
                 blocker.setAutoCommit(false);
-                // The server holds the read until this lock is released, so the client gets no bytes back, as it
-                // would from a peer that stopped answering.
+                // The read waits behind this lock. The server's lock_timeout fails it, so the caller gets SQLState
+                // 55P03 and not a socket timeout.
                 execute(blocker, "LOCK TABLE " + schema + ".flags IN ACCESS EXCLUSIVE MODE");
                 CompletableFuture<Map<FlagKey, Integer>> read = storage.loadFlags(UUID.randomUUID());
 
-                CompletionException failure = assertThrows(CompletionException.class,
-                        () -> read.orTimeout(NO_ANSWER_LIMIT_SECONDS, TimeUnit.SECONDS).join());
-
-                assertFalse(failure.getCause() instanceof TimeoutException,
-                        "the read was still waiting after " + NO_ANSWER_LIMIT_SECONDS + " seconds");
-                assertInstanceOf(SQLException.class, failure.getCause());
+                assertFailsOnTheServerLockTimeout(read);
                 blocker.rollback();
             }
         }
+    }
+
+    /**
+     * An autocommit write that waits on a lock fails on the server's lock timeout, so it is rolled back. A write the
+     * client has given up on would stay queued and count the visit once the lock is released, and a retry would count it
+     * twice.
+     */
+    @Test
+    void anAutocommitVisitThatWaitsOnALockIsNotCountedWhenTheLockIsReleased() throws Exception {
+        String schema = newSchema();
+        try (PostgresStorage storage = open(schema)) {
+            storage.migrate();
+            assertBlockedVisitIsNotCounted(schema, storage);
+        }
+    }
+
+    /**
+     * A socketTimeout in the jdbc_url replaces the default, and the server limits follow it. At 5 seconds the lock limit
+     * is 2, so the write still fails on the server before the socket read fails.
+     */
+    @Test
+    void aSocketTimeoutInTheUrlStillFailsALockWaitOnTheServer() throws Exception {
+        String schema = newSchema();
+        try (PostgresStorage storage = openWithUrl(schema, "socketTimeout=5")) {
+            storage.migrate();
+            assertBlockedVisitIsNotCounted(schema, storage);
+        }
+    }
+
+    /**
+     * The URL's own options come before the server limits, so a lock_timeout of 0 in the URL cannot switch the lock limit
+     * off. Without that, the read would wait until the test's own limit ends it.
+     */
+    @Test
+    void theServerLimitsWinOverALockTimeoutInTheUrlsOptions() throws Exception {
+        String schema = newSchema();
+        String options = "-c lock_timeout=0";
+        try (PostgresStorage storage = openWithUrl(schema,
+                "options=" + URLEncoder.encode(options, StandardCharsets.UTF_8))) {
+            storage.migrate();
+            try (Connection blocker = connect()) {
+                blocker.setAutoCommit(false);
+                execute(blocker, "LOCK TABLE " + schema + ".flags IN ACCESS EXCLUSIVE MODE");
+                CompletableFuture<Map<FlagKey, Integer>> read = storage.loadFlags(UUID.randomUUID());
+
+                assertFailsOnTheServerLockTimeout(read);
+                blocker.rollback();
+            }
+        }
+    }
+
+    /**
+     * With the default URL a pooled connection reads with a 10-second socket timeout. Its lock_timeout is half the socket
+     * timeout (5 seconds), and its statement_timeout is two seconds less (8 seconds).
+     */
+    @Test
+    void aPooledConnectionCarriesTheDefaultSocketTimeoutAndItsServerLimits() {
+        try (PostgresStorage storage = open(newSchema())) {
+            assertEquals(new PostgresStorage.SessionLimits(10_000, "5s", "8s"), await(storage.sessionLimits()));
+        }
+    }
+
+    /**
+     * A socketTimeout of 6 seconds in the URL sets the socket read timeout to 6 seconds, the lock_timeout to 3 seconds
+     * (half), and the statement_timeout to 4 seconds (two less).
+     */
+    @Test
+    void aPooledConnectionCarriesTheSocketTimeoutFromTheUrlAndItsServerLimits() {
+        try (PostgresStorage storage = openWithUrl(newSchema(), "socketTimeout=6")) {
+            assertEquals(new PostgresStorage.SessionLimits(6_000, "3s", "4s"), await(storage.sessionLimits()));
+        }
+    }
+
+    /** A blank options parameter in the URL keeps the lock limit, so a lock wait still fails on the server. */
+    @Test
+    void aLockWaitStillFailsOnTheServerWhenTheUrlHasABlankOptionsParameter() throws Exception {
+        String schema = newSchema();
+        try (PostgresStorage storage = openWithUrl(schema, "options=")) {
+            storage.migrate();
+            assertBlockedVisitIsNotCounted(schema, storage);
+        }
+    }
+
+    /**
+     * Holds a lock on the visits table and records a visit that must wait on it. The visit must fail on the server's lock
+     * timeout. Once the lock is released and the server session has finished, the visit must not be counted.
+     */
+    private static void assertBlockedVisitIsNotCounted(String schema, PostgresStorage storage) throws Exception {
+        await(storage.recordVisit(ALICE, GREETER, T0));
+        try (Connection blocker = connect()) {
+            blocker.setAutoCommit(false);
+            execute(blocker, "LOCK TABLE " + schema + ".visits IN ACCESS EXCLUSIVE MODE");
+            CompletableFuture<VisitRecord> visit = storage.recordVisit(ALICE, GREETER, T1);
+
+            assertFailsOnTheServerLockTimeout(visit);
+            blocker.rollback();
+            awaitNoRunningStatementOn(blocker, "visits");
+        }
+
+        assertEquals(Map.of(GREETER, new VisitRecord(1, T0)), await(storage.loadVisits(ALICE)));
+    }
+
+    /**
+     * The statement must fail with the server's lock timeout, SQLState 55P03. A 08006 means the client's socket read gave
+     * up first, and the server may still run the statement once the lock is released.
+     */
+    private static void assertFailsOnTheServerLockTimeout(CompletableFuture<?> pending) {
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> pending.orTimeout(NO_ANSWER_LIMIT_SECONDS, TimeUnit.SECONDS).join());
+
+        assertFalse(failure.getCause() instanceof TimeoutException,
+                "the statement was still waiting after " + NO_ANSWER_LIMIT_SECONDS + " seconds");
+        assertEquals("55P03", assertInstanceOf(SQLException.class, failure.getCause()).getSQLState());
+    }
+
+    /** A storage whose URL is the container's with one more parameter, as an operator's jdbc_url would carry it. */
+    private static PostgresStorage openWithUrl(String schema, String parameter) {
+        String base = POSTGRES.getJdbcUrl();
+        String url = base + (base.contains("?") ? "&" : "?") + parameter;
+        return new PostgresStorage(url, POSTGRES.getUsername(), POSTGRES.getPassword(), schema, 2);
     }
 
     private static PostgresStorage open(String schema) {
@@ -292,6 +414,32 @@ class PostgresStorageTest extends HaruhiStorageContractTest {
                         + "WHERE datname = current_database() AND wait_event_type = 'Lock'")) {
             rows.next();
             return rows.getInt(1);
+        }
+    }
+
+    /**
+     * Waits until no other session of this database is running a statement on the table. A write that was still queued
+     * behind a lock has then finished, one way or the other.
+     */
+    private static void awaitNoRunningStatementOn(Connection observer, String table) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(LOCK_WAIT_LIMIT_SECONDS);
+        while (runningStatementsOn(observer, table) > 0) {
+            if (System.nanoTime() > deadline) {
+                fail("a statement on " + table + " is still running. Sessions: " + sessions(observer));
+            }
+            Thread.sleep(20);
+        }
+    }
+
+    private static int runningStatementsOn(Connection observer, String table) throws SQLException {
+        try (PreparedStatement statement = observer.prepareStatement("SELECT count(*) FROM pg_stat_activity "
+                + "WHERE datname = current_database() AND pid <> pg_backend_pid() AND state = 'active' "
+                + "AND query LIKE ?")) {
+            statement.setString(1, "%" + table + "%");
+            try (ResultSet rows = statement.executeQuery()) {
+                rows.next();
+                return rows.getInt(1);
+            }
         }
     }
 

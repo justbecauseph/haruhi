@@ -158,7 +158,17 @@ Connection settings Haruhi applies:
 - Every connection uses `schema` as its default schema, so the tables need no schema prefix and the database role's
   `search_path` does not matter.
 - `socketTimeout=10` (seconds) and `tcpKeepAlive=true`. A read that gets no answer fails after 10 seconds instead of
-  holding a connection forever. A `socketTimeout` or `tcpKeepAlive` parameter in `jdbc_url` takes priority.
+  holding a connection forever. A `socketTimeout` or `tcpKeepAlive` parameter in `jdbc_url` takes priority; a
+  `socketTimeout` must be 5 to 2147483 seconds, or the game does not start.
+- Server-side `lock_timeout` of half the socket timeout, rounded down, and `statement_timeout` of the socket timeout less
+  2 seconds (5 and 8 seconds by default). On a server that is answering, these cancel and roll back a statement that
+  waits on a lock or runs too long, before the client gives up on it. They do not limit the commit: a slow disk or a
+  synchronous standby can make the commit outlast the socket timeout. They do not help when the network stalls.
+- A failure with SQLState 08006 (connection lost or socket timeout) leaves the outcome unknown. The server may still
+  run the statement or commit it after the client has given up.
+- An `options` parameter in `jdbc_url` is kept, and these two limits are added after it, so they override a
+  `lock_timeout` or `statement_timeout` it sets. A blank `options` (`?options=`, or a bare `?options`) does not remove
+  the limits.
 
 The pool is built when the mod initialises and opens its first connection then, so if PostgreSQL cannot be reached,
 the game does not start. The migrations run when the server starts.
