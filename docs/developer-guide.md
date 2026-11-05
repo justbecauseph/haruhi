@@ -229,7 +229,7 @@ obfuscated, so a plain `implementation` dependency on the jar works with Loom:
 ```groovy
 repositories {
     maven {
-        url = 'https://raw.githubusercontent.com/justbecauseph/maven/main'
+        url = 'https://justbecauseph.github.io/maven'
         content { includeGroup 'town.lampas' }
     }
 }

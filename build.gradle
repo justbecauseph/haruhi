@@ -126,7 +126,7 @@ java {
 
 // Published to the JustBecause Maven repository (https://github.com/justbecauseph/maven) by
 // .github/workflows/release.yml. Minecraft 26.2 is not obfuscated, so the jar is used as built:
-// implementation "town.lampas:haruhi:<version>" from https://raw.githubusercontent.com/justbecauseph/maven/main.
+// implementation "town.lampas:haruhi:<version>" from https://justbecauseph.github.io/maven.
 publishing {
 	publications {
 		mavenJava(MavenPublication) {
