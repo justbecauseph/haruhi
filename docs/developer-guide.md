@@ -179,7 +179,9 @@ What the server checks, and in what order:
 4. The choice's actions run in order. An action that throws ends the conversation and is logged. A `goTo`, `end` or
    `openGraph` call replaces the choice's `next`; the last call in a batch wins.
 5. Entering the next node runs its `on_enter` actions, then follows routers and jumps until a node with text is
-   reached. One step may enter at most 64 nodes and chain at most 8 graphs through `haruhi:open`.
+   reached. A router tests its branches' `only_if` conditions after its `on_enter`, picks by weight among those that
+   hold, and moves to its `next` when none hold, or ends without one; a condition that throws ends the conversation
+   and is logged. One step may enter at most 64 nodes and chain at most 8 graphs through `haruhi:open`.
 
 The client sends only the session id, the node id and the choice index. Actions never travel to the client.
 

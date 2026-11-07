@@ -11,6 +11,7 @@ import net.minecraft.util.RandomSource;
 import org.junit.jupiter.api.Test;
 import town.lampas.haruhi.content.model.WeightedNext;
 import town.lampas.haruhi.dialogue.api.DialogueAction;
+import town.lampas.haruhi.dialogue.api.DialogueCondition;
 import town.lampas.haruhi.dialogue.runtime.GraphFixtures.FakeFlags;
 import town.lampas.haruhi.network.DialogueChoicePayload;
 
@@ -207,6 +208,150 @@ class GraphRunnerTest {
     void aJumpLoopInOnEnterActionsIsCutOffWithAnEndedConversation() {
         CompiledGraph graph = GraphFixtures.graph("a",
                 GraphFixtures.node("a", "A", null, List.of(), ctx -> ctx.goTo("a")));
+        assertInstanceOf(Step.Ended.class, runner.start(GraphFixtures.session(1, graph, new FakeFlags(), 1, 7)));
+    }
+
+    private static final DialogueCondition MET_SET = ctx -> ctx.flags().isSet(GraphFixtures.MET);
+
+    /**
+     * A greeting router: "again" when the player has met the NPC, else its {@code fallback}. Starts at the first of
+     * {@code more}, else at the router.
+     */
+    private static CompiledGraph greeting(String fallback, List<DialogueAction> onEnter, CompiledGraph.Node... more) {
+        List<CompiledGraph.Node> nodes = new ArrayList<>(List.of(
+                GraphFixtures.router("greet", fallback, List.of(GraphFixtures.branch("again", 1, MET_SET)), onEnter),
+                GraphFixtures.node("again", "Back again?", null, List.of()),
+                GraphFixtures.node("first", "Welcome.", null, List.of())));
+        nodes.addAll(List.of(more));
+        String start = more.length > 0 ? more[0].source().id() : "greet";
+        return GraphFixtures.graph(start, nodes.toArray(CompiledGraph.Node[]::new));
+    }
+
+    @Test
+    void aRouterTakesABranchWhoseConditionsHold() {
+        FakeFlags flags = new FakeFlags();
+        flags.set(GraphFixtures.MET, 1);
+        DialogueSession session = GraphFixtures.session(1, greeting("first", List.of()), flags, 2, 7);
+
+        assertEquals("again", nodeOf(runner.start(session)));
+    }
+
+    @Test
+    void aRouterMovesToItsNextWhenNoBranchHolds() {
+        DialogueSession session = GraphFixtures.session(1, greeting("first", List.of()), new FakeFlags(), 1, 7);
+
+        assertEquals("first", nodeOf(runner.start(session)));
+    }
+
+    @Test
+    void aRouterWithNoBranchThatHoldsAndNoNextEndsTheConversation() {
+        DialogueSession session = GraphFixtures.session(1, greeting(null, List.of()), new FakeFlags(), 1, 7);
+
+        assertInstanceOf(Step.Ended.class, runner.start(session));
+    }
+
+    @Test
+    void aBranchConditionReadsAFlagThatThePickLeadingToTheRouterSet() {
+        FakeFlags flags = new FakeFlags();
+        CompiledGraph graph = greeting("first", List.of(),
+                GraphFixtures.node("hello", "Hi", null, List.of(
+                        GraphFixtures.choice("Nice to meet you", GraphFixtures.ALWAYS, "greet",
+                                ctx -> ctx.flags().set(GraphFixtures.MET, 1)))));
+        DialogueSession session = GraphFixtures.session(1, graph, flags, 1, 7);
+        assertEquals("hello", nodeOf(runner.start(session)));
+
+        assertEquals("again", nodeOf(runner.choose(session, 0)),
+                "the router tests its branch after the pick's action set the flag, in the same step");
+    }
+
+    @Test
+    void aBranchConditionReadsAFlagThatTheRoutersOwnOnEnterSet() {
+        DialogueAction meet = ctx -> ctx.flags().set(GraphFixtures.MET, 1);
+        DialogueSession session = GraphFixtures.session(1, greeting("first", List.of(meet)), new FakeFlags(), 1, 7);
+
+        assertEquals("again", nodeOf(runner.start(session)), "branches are tested after the router's on_enter");
+    }
+
+    @Test
+    void aFallbackThatReentersTheRouterSeesEachEntrysWrites() {
+        FakeFlags flags = new FakeFlags();
+        DialogueAction count = ctx -> ctx.flags().add(GraphFixtures.MET, 1);
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", "r",
+                        List.of(GraphFixtures.branch("done", 1, ctx -> ctx.flags().get(GraphFixtures.MET) >= 3)),
+                        List.of(count)),
+                GraphFixtures.node("done", "Done", null, List.of()));
+
+        assertEquals("done", nodeOf(runner.start(GraphFixtures.session(1, graph, flags, 1, 7))));
+        assertEquals(3, flags.get(GraphFixtures.MET), "the router was entered three times");
+    }
+
+    @Test
+    void aFallbackLoopIsCutOffWithAnEndedConversation() {
+        FakeFlags flags = new FakeFlags();
+        DialogueAction count = ctx -> ctx.flags().add(GraphFixtures.MET, 1);
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", "r", List.of(GraphFixtures.branch("x", 1, GraphFixtures.NEVER)),
+                        List.of(count)),
+                GraphFixtures.node("x", "X", null, List.of()));
+
+        assertInstanceOf(Step.Ended.class, runner.start(GraphFixtures.session(1, graph, flags, 1, 7)));
+        assertEquals(GraphRunner.MAX_HOPS, flags.get(GraphFixtures.MET), "the guard stops after MAX_HOPS entries");
+    }
+
+    @Test
+    void theWeightedPickIsAmongTheBranchesThatHoldOnly() {
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", null, List.of(
+                        GraphFixtures.branch("a", 1_000_000, GraphFixtures.NEVER),
+                        GraphFixtures.branch("b", 1, GraphFixtures.ALWAYS),
+                        GraphFixtures.branch("c", 1)), List.of()),
+                GraphFixtures.node("a", "A", null, List.of()),
+                GraphFixtures.node("b", "B", null, List.of()),
+                GraphFixtures.node("c", "C", null, List.of()));
+        RandomSource random = RandomSource.create(5L);
+        int[] counts = new int[3];
+        int draws = 4_000;
+        for (int i = 0; i < draws; i++) {
+            DialogueSession session = GraphFixtures.session(i + 1, graph, new FakeFlags(), 1, random);
+            counts[nodeOf(runner.start(session)).charAt(0) - 'a']++;
+        }
+        assertEquals(0, counts[0], "a branch whose condition fails is never picked, whatever its weight");
+        assertEquals(0.5, (double) counts[1] / draws, 0.05, "the two open branches split by their weights");
+    }
+
+    @Test
+    void aGotoFromTheRoutersOnEnterWinsOverItsBranchesAndNext() {
+        DialogueCondition boom = ctx -> {
+            throw new IllegalStateException("branches must not be tested after a goto");
+        };
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", "x", List.of(GraphFixtures.branch("x", 1, boom)),
+                        List.of(ctx -> ctx.goTo("y"))),
+                GraphFixtures.node("x", "X", null, List.of()),
+                GraphFixtures.node("y", "Y", null, List.of()));
+
+        assertEquals("y", nodeOf(runner.start(GraphFixtures.session(1, graph, new FakeFlags(), 1, 7))));
+    }
+
+    @Test
+    void anEndFromTheRoutersOnEnterEndsInsteadOfRouting() {
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", "x", List.of(GraphFixtures.branch("x", 1, GraphFixtures.ALWAYS)),
+                        List.of(ctx -> ctx.end())),
+                GraphFixtures.node("x", "X", null, List.of()));
+
+        assertInstanceOf(Step.Ended.class, runner.start(GraphFixtures.session(1, graph, new FakeFlags(), 1, 7)));
+    }
+
+    @Test
+    void aRouterConditionThatThrowsEndsTheConversation() {
+        CompiledGraph graph = GraphFixtures.graph("r",
+                GraphFixtures.router("r", "x", List.of(GraphFixtures.branch("x", 1, ctx -> {
+                    throw new IllegalStateException("boom");
+                })), List.of()),
+                GraphFixtures.node("x", "X", null, List.of()));
+
         assertInstanceOf(Step.Ended.class, runner.start(GraphFixtures.session(1, graph, new FakeFlags(), 1, 7)));
     }
 

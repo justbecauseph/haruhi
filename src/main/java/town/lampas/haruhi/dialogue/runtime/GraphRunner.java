@@ -1,5 +1,6 @@
 package town.lampas.haruhi.dialogue.runtime;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.util.RandomSource;
@@ -77,7 +78,10 @@ public final class GraphRunner {
         return step instanceof Step.Show show ? new Step.Show(show.node(), true) : step;
     }
 
-    /** Enters a node: runs its on-enter actions, then routes it or presents it. Loops over routers and jumps. */
+    /**
+     * Enters a node: runs its on-enter actions, then routes it or presents it. Loops over routers, router fallbacks and
+     * jumps; each node entered counts toward {@link #MAX_HOPS}.
+     */
     private Step enter(DialogueSession session, String first) {
         String nodeId = first;
         for (int hops = 1; hops <= MAX_HOPS; hops++) {
@@ -103,7 +107,20 @@ public final class GraphRunner {
                 continue;
             }
             if (node.source().isRouter()) {
-                Optional<String> branch = pickBranch(node.source().random(), session.random());
+                Optional<List<WeightedNext>> open = openBranches(session, nodeId, node);
+                if (open.isEmpty()) {
+                    return new Step.Ended();
+                }
+                if (open.get().isEmpty()) {
+                    // No branch's conditions hold: the router's next is the "otherwise".
+                    Optional<String> fallback = node.source().next();
+                    if (fallback.isEmpty()) {
+                        return new Step.Ended();
+                    }
+                    nodeId = fallback.get();
+                    continue;
+                }
+                Optional<String> branch = pickBranch(open.get(), session.random());
                 if (branch.isEmpty()) {
                     Haruhi.LOGGER.error("Router {}#{} has no positive weight; ending the conversation",
                             session.graphId(), nodeId);
@@ -121,6 +138,30 @@ public final class GraphRunner {
         Haruhi.LOGGER.error("Dialogue {} entered more than {} nodes in one step; ending the conversation",
                 session.graphId(), MAX_HOPS);
         return new Step.Ended();
+    }
+
+    /**
+     * The router branches that can be picked now: those whose conditions all hold, in their written order. The
+     * conditions are tested after the router's on-enter actions, so they read what those actions, and every action
+     * earlier in the same step, wrote. A condition that throws ends the conversation, so the caller gets empty and
+     * ends it.
+     */
+    private static Optional<List<WeightedNext>> openBranches(
+            DialogueSession session, String nodeId, CompiledGraph.Node node) {
+        RunContext context = RunContext.of(session, nodeId);
+        List<WeightedNext> open = new ArrayList<>();
+        try {
+            for (CompiledGraph.Branch branch : node.branches()) {
+                if (branch.conditions().stream().allMatch(condition -> condition.test(context))) {
+                    open.add(branch.source());
+                }
+            }
+        } catch (RuntimeException e) {
+            Haruhi.LOGGER.error("A router condition failed at {}#{}; ending the conversation",
+                    session.graphId(), nodeId, e);
+            return Optional.empty();
+        }
+        return Optional.of(open);
     }
 
     /**

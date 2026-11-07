@@ -14,6 +14,7 @@ import town.lampas.haruhi.content.model.DialogueChoice;
 import town.lampas.haruhi.content.model.DialogueGraph;
 import town.lampas.haruhi.content.model.DialogueNode;
 import town.lampas.haruhi.content.model.ProviderSpec;
+import town.lampas.haruhi.content.model.WeightedNext;
 import town.lampas.haruhi.dialogue.api.ActionType;
 import town.lampas.haruhi.dialogue.api.ChoiceProvider;
 import town.lampas.haruhi.dialogue.api.ChoiceProviderType;
@@ -29,11 +30,22 @@ import town.lampas.haruhi.dialogue.api.ParseContext;
  */
 public final class CompiledGraph {
 
-    /** A node: what runs on entry, and its choices. Routing and text come from the source node. */
-    public record Node(DialogueNode source, List<DialogueAction> onEnter, List<Choice> choices) {
+    /**
+     * A node: what runs on entry, its router branches and its choices. Text and the fallback {@code next} come from the
+     * source node.
+     */
+    public record Node(DialogueNode source, List<DialogueAction> onEnter, List<Branch> branches, List<Choice> choices) {
         public Node {
             onEnter = List.copyOf(onEnter);
+            branches = List.copyOf(branches);
             choices = List.copyOf(choices);
+        }
+    }
+
+    /** A router branch with its gate: it can be picked only when every condition holds. */
+    public record Branch(WeightedNext source, List<DialogueCondition> conditions) {
+        public Branch {
+            conditions = List.copyOf(conditions);
         }
     }
 
@@ -94,11 +106,19 @@ public final class CompiledGraph {
         for (ActionSpec spec : node.onEnter()) {
             onEnter.add(action(spec, context));
         }
+        List<Branch> branches = new ArrayList<>();
+        for (WeightedNext branch : node.random()) {
+            List<DialogueCondition> conditions = new ArrayList<>();
+            for (ConditionSpec spec : branch.onlyIf()) {
+                conditions.add(condition(spec, context));
+            }
+            branches.add(new Branch(branch, conditions));
+        }
         List<Choice> choices = new ArrayList<>();
         for (DialogueChoice choice : node.choices()) {
             choices.add(compileChoice(choice, context));
         }
-        return new Node(node, onEnter, choices);
+        return new Node(node, onEnter, branches, choices);
     }
 
     private static Choice compileChoice(DialogueChoice choice, ParseContext context) {

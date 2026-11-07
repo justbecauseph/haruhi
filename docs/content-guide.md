@@ -191,21 +191,24 @@ There are three kinds of node:
 - A **line**: `text` and no `choices`. The player continues to `next`; with no `next`, continuing ends the conversation.
 - A **menu**: `text` and `choices`. The player picks one of the visible choices.
 - A **router**: `random` and no `text` or `choices`. It shows nothing and moves straight on to one branch, picked by
-  weight.
+  weight among the branches whose conditions hold, or to its `next` when none hold (see
+  [Branching without the player](#branching-without-the-player)).
 
 | Node field | Applies to | Default | Meaning |
 |---|---|---|---|
 | `text` | line, menu | required | What the speaker says. Text component. |
 | `choices` | menu | none | Array of choices, shown in order. |
-| `next` | line, menu | none | Node to move to on continue. On a menu it is used only when every choice is hidden. |
-| `random` | router | none | Array of `{"node": "<id>", "weight": <whole number>}`. Each weight must be above 0, and the weights may add up to at most 2147483647. A branch's chance is its weight over the total. |
+| `next` | all | none | Node to move to on continue. On a menu it is used only when every choice is hidden. On a router it is used only when no branch can be picked. |
+| `random` | router | none | Array of branches, `{"node": "<id>", "weight": <whole number>, "only_if": [<conditions>]}`; `only_if` is optional. Each weight must be above 0, and the weights may add up to at most 2147483647. A branch's chance is its weight over the total weight of the branches that can be picked. |
 | `on_enter` | all | `[]` | Actions run, in order, every time the node is entered. |
 | `speaker` | line, menu | the NPC being talked to, or the binding's speaker | NPC profile id whose name and portrait the box shows. Must be an NPC in the bundle. |
 | `portrait` | line, menu | the speaker's `portrait` | Texture id of a 2D portrait for this node only. |
 | `animation` | line, menu | none | Animation name the speaking NPC plays when the node shows. |
 
-A router uses only `random` and `on_enter`. It may carry `next`, which must still name a node of the graph, but the
-conversation never follows it and the reachability check does not count it.
+A router uses only `random`, `next` and `on_enter`. A branch with `only_if` can be picked only when all of its
+conditions hold. When no branch can be picked, the router moves to its `next`, or ends the conversation when it has
+none. A branch without `only_if` can always be picked, so a router with such a branch never uses its `next`, and the
+reachability check counts a router's `next` only when every branch has `only_if`.
 
 `speaker`, `portrait` and `animation` work together:
 
@@ -219,6 +222,63 @@ conversation never follows it and the reachability check does not count it.
   `animation` only when that entity is a Haruhi NPC. A node whose `speaker` is a different profile shows that profile's
   name and its `portrait` if it has one, and no 3D head.
 - A portrait that the player's client does not have is skipped, and the 3D head shows instead when it can.
+
+### Branching without the player
+
+A router branch with `only_if` is how a character says one thing to one player and another thing to someone else,
+without the player picking anything. The router tests each branch's conditions, picks by weight among the branches
+whose conditions all hold, and moves to its `next` when none do. A greeting that differs for returning players:
+
+```json
+"greet": {
+  "random": [
+    {
+      "node": "welcome_back",
+      "weight": 1,
+      "only_if": [ { "type": "haruhi:flag", "namespace": "shop:mira", "flag": "met", "op": "set" } ]
+    }
+  ],
+  "next": "first_meeting"
+},
+"first_meeting": {
+  "text": "I don't think we've met. I'm Mira.",
+  "on_enter": [ { "type": "haruhi:flag/set", "namespace": "shop:mira", "flag": "met" } ],
+  "next": "menu"
+},
+"welcome_back": { "text": "Back again? Good to see you.", "next": "menu" }
+```
+
+A player who has met Mira goes to `welcome_back`; anyone else goes to `first_meeting`, which sets `met` for next time.
+
+- The conditions are tested after the router's own `on_enter`, and flags change at once, so a flag set earlier in the
+  same step counts: by the choice that led to the router, by a node entered on the way, or by the router's `on_enter`.
+- Several conditions on one branch must all hold. Use `haruhi:any_of` for "either", and `haruhi:not` for "unless".
+- When several branches can be picked, the weights decide between them, so two branches gated on the same flag give
+  returning players a random greeting. Branches are not checked in order, and a branch without `only_if` is always
+  among them, so it is not an "otherwise": the router's `next` is. For "first this, else that, else the other", chain
+  routers: give the first router one branch and make its `next` a second router.
+- Each router counts as a node entered, toward the limit of 64 in one step.
+
+```json
+"greet": {
+  "random": [
+    { "node": "night_greeting", "weight": 1, "only_if": [ { "type": "haruhi:time", "from": 13000, "to": 23000 } ] }
+  ],
+  "next": "greet_by_day"
+},
+"greet_by_day": {
+  "random": [
+    {
+      "node": "welcome_back",
+      "weight": 1,
+      "only_if": [ { "type": "haruhi:flag", "namespace": "shop:mira", "flag": "met", "op": "set" } ]
+    }
+  ],
+  "next": "first_meeting"
+}
+```
+
+Here the night greeting comes first for everyone; by day the player gets `welcome_back` or `first_meeting` as above.
 
 ### Choices
 
@@ -264,7 +324,10 @@ flowchart TD
     moved -- "end" --> ended["Conversation ends"]
     moved -- "open" --> opened["Conversation ends; the other graph opens with the same NPC"]
     moved -- "no" --> router{"Router?"}
-    router -- "yes" --> pick["Pick a branch by weight"] --> enter
+    router -- "yes" --> canPick{"Can any branch be picked? (its only_if holds)"}
+    canPick -- "yes" --> pick["Pick one of those branches by weight"] --> enter
+    canPick -- "no, router has next" --> enter
+    canPick -- "no, no next" --> ended
     router -- "no" --> show["Show the text and the visible choices"]
     show --> input{"Player"}
     input -- "picks an available choice" --> actions["Run the choice's actions"]
@@ -283,7 +346,7 @@ flowchart TD
 Entering a node runs its `on_enter` actions in order. `haruhi:goto`, `haruhi:end` and `haruhi:open` take effect after
 all of that node's actions have run, and when several are called the last one wins. A node left this way is never
 shown. Choices are worked out after `on_enter`, so a flag set in `on_enter` already counts for the node's own choices.
-A router picks one branch and enters it.
+A router tests its branches' `only_if` after `on_enter` in the same way, then enters one branch, or its `next`.
 
 Showing a node sends the text, the speaker and the visible choices to the player. Hidden choices are left out;
 grayed-out choices are listed but cannot be picked.
@@ -308,8 +371,8 @@ A conversation also ends when:
 - `haruhi:open` is chained more than 8 times in one step;
 - a game master runs `/haruhi dialogue close`.
 
-Branching without the player is only random: there is no built-in "if" jump. To branch on a flag or a world
-condition, put the branches in choices with `only_if`.
+To branch without the player on a flag or a world condition, give router branches `only_if` (see
+[Branching without the player](#branching-without-the-player)).
 
 ## Bindings: blocks and entities
 
@@ -459,15 +522,15 @@ What is checked:
 - Every reference resolves: an NPC's `dialogue` graph, a node's `speaker` NPC, the graph's `start`, every `next`,
   router branch and `haruhi:goto` node in the same graph, and every `haruhi:open` graph in the bundle.
 - Router rules: no `text` or `choices`, at least one branch, every weight above 0, weights adding up to at most
-  2147483647. Every other node has `text`. Every choice has `text` or `provider`, and `when_unavailable` is `hidden` or
-  `grayed_out`.
+  2147483647, and a branch's `only_if` is a list of conditions. Every other node has `text`. Every choice has `text`
+  or `provider`, and `when_unavailable` is `hidden` or `grayed_out`.
 - Every condition, action and provider type is registered, and its arguments parse by that type's rules, including
   nested conditions.
 - Every flag a condition or action uses is declared.
 - Every `haruhi:command` is on the allowlist.
-- Every node is reachable from `start`, following `next`, choice `next`, router branches and `haruhi:goto` targets. A
-  graph where a reachable node holds a provider choice is exempt, because a provider names its target node only at run
-  time.
+- Every node is reachable from `start`, following `next` (a router's only when every one of its branches has
+  `only_if`), choice `next`, router branches and `haruhi:goto` targets. A graph where a reachable node holds a
+  provider choice is exempt, because a provider names its target node only at run time.
 
 Not checked, because they are only known at run time or on the player's client: model, texture, animations and
 portrait ids; animation names; sound ids; item and item tag ids; loot tables, predicates and advancements. Each falls
@@ -475,7 +538,7 @@ back or fails soft at run time, as the tables above say.
 
 Each problem is one line, `<where>: <problem>`. `<where>` is `bundle`, `npc <id>`, `<graph>`, `<graph>#<node>`,
 `<graph>#<node>, choice <n>` or `<graph>#<node>, random entry <n>`. Problems with the arguments of a condition or
-action name the node and the type, but not the choice number. A JSON syntax error is reported as
+action name the node and the type, but not the choice or random entry number. A JSON syntax error is reported as
 `bundle: not valid JSON: <parser message>`, followed by a second line with the parser's troubleshooting link. Some
 messages:
 
@@ -492,6 +555,7 @@ messages:
 | A choice `next` that names no node | `shop:mira#menu, choice 2: next 'rumor' is not a node in this graph` |
 | A router with `text` | `shop:mira#greet: a router node has no text` |
 | A weight of 0 | `shop:mira#greet, random entry 2: weight must be above 0` |
+| `onlyIf` in a router branch | `shop:mira#greet, random entry 1: unknown key 'onlyIf'` |
 | A node nothing leads to | `shop:mira#old_line: node is not reachable from start 'greet'` |
 | A misspelt condition type | `shop:mira#menu, choice 1: condition haruhi:flags is not registered` |
 | An undeclared flag | `shop:mira#menu: haruhi:flag: flag 'mett' is not declared in namespace 'shop:mira'` |
@@ -503,7 +567,8 @@ messages:
 
 This bundle has a shopkeeper, Mira, and a passer-by, Old Tom. Mira's conversation has:
 
-- a greeting router (`greet`) that counts the visit in a flag and then picks a warm greeting three times out of four;
+- a greeting router (`greet`) that counts the visit in a flag, greets a newcomer, and gives a player Mira has met a
+  warm greeting three times out of four;
 - a choice gated on a flag: "Heard any rumours?" stays hidden until the player has introduced themselves;
 - a grayed-out choice with a reason: "Can I see the back room?" can only be picked at night, and says why on hover;
 - a reward given once: "Got anything to read?" gives a book through `haruhi:give` and disappears once taken;
@@ -539,6 +604,22 @@ with your own assets, as [Models and animations](models-and-animations.md) descr
           "on_enter": [
             { "type": "haruhi:flag/add", "namespace": "shop:mira", "flag": "times_talked" }
           ],
+          "random": [
+            {
+              "node": "greet_again",
+              "weight": 1,
+              "only_if": [
+                { "type": "haruhi:flag", "namespace": "shop:mira", "flag": "met", "op": "set" }
+              ]
+            }
+          ],
+          "next": "greet_new"
+        },
+        "greet_new": {
+          "text": "Hello there. I don't think I know you.",
+          "next": "menu"
+        },
+        "greet_again": {
           "random": [
             { "node": "greet_warm", "weight": 3 },
             { "node": "greet_busy", "weight": 1 }
@@ -632,8 +713,9 @@ with your own assets, as [Models and animations](models-and-animations.md) descr
 
 How it plays:
 
-- `greet` adds 1 to `times_talked` on every visit, then routes to `greet_warm` (weight 3) or `greet_busy` (weight 1).
-  `greet_warm` plays the humanoid's `wave` clip on Mira, which the talking player sees when their client has
+- `greet` adds 1 to `times_talked` on every visit. A player who has not met Mira yet goes to its `next`,
+  `greet_new`. Once `met` is set, `greet` goes to `greet_again`, which routes to `greet_warm` (weight 3) or
+  `greet_busy` (weight 1). `greet_warm` plays the humanoid's `wave` clip on Mira, which the talking player sees when their client has
   GeckoLib.
 - On a first visit `menu` shows "I'm new in town.", "Got anything to read?", the grayed-out back room choice by day,
   and "Just browsing.". Picking "I'm new in town." sets `met`; back at `menu` that choice is hidden and "Heard any

@@ -10,7 +10,9 @@ import net.minecraft.resources.Identifier;
  *
  * <p>Entering a node runs {@code onEnter} in order. Then:
  * <ul>
- *   <li>if {@code random} is non-empty, the node is a router: it shows nothing and moves to one weighted pick;</li>
+ *   <li>if {@code random} is non-empty, the node is a router: it shows nothing and moves to one weighted pick among
+ *       the branches whose conditions hold; when none hold, it moves to {@code next}, or ends the conversation when
+ *       {@code next} is empty;</li>
  *   <li>otherwise it shows {@code text} (required for non-router nodes) and either the available {@code choices}, or,
  *       with no choices, a single continue that moves to {@code next}, or ends the conversation when {@code next} is
  *       empty.</li>

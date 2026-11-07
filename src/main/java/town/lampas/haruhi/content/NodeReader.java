@@ -37,7 +37,7 @@ final class NodeReader {
     static final Set<String> CHOICE_KEYS = Set.of(
             "text", "provider", "next", "only_if", "when_unavailable", "unavailable_message", "actions");
     /** The keys a random branch may have. Any other key is an error. */
-    static final Set<String> BRANCH_KEYS = Set.of("node", "weight");
+    static final Set<String> BRANCH_KEYS = Set.of("node", "weight", "only_if");
 
     private final DynamicOps<JsonElement> ops;
     private final Problems problems;
@@ -76,8 +76,11 @@ final class NodeReader {
         Fields fields = new Fields(value.getAsJsonObject(), where, problems);
         fields.allowOnly(NODE_KEYS);
 
+        // The node's own specs come before its branches' and choices' specs, as on_enter runs before the router picks
+        // and before the choices show.
+        int firstSpec = specs.size();
         boolean router = fields.has("random");
-        List<WeightedNext> random = readBranches(fields, where);
+        List<WeightedNext> random = readBranches(fields, nodeId, where);
         if (router && fields.has("text")) {
             fields.add("a router node has no text");
         }
@@ -87,8 +90,6 @@ final class NodeReader {
         Optional<Component> text = router
                 ? fields.optional("text", JsonValues.text(ops))
                 : fields.required("text", JsonValues.text(ops));
-        // The node's own specs come before its choices' specs, as on_enter runs before the choices show.
-        int firstSpec = specs.size();
         List<DialogueChoice> choices = router ? List.of() : readChoices(fields, nodeId, where);
 
         Optional<String> next = fields.optional("next", JsonValues::string);
@@ -113,9 +114,10 @@ final class NodeReader {
 
     /**
      * The branches of a router, with the valid ones kept. The weights of all branches must add up to at most
-     * {@link Integer#MAX_VALUE}, so the runtime can pick one with int arithmetic.
+     * {@link Integer#MAX_VALUE}, so the runtime can pick one with int arithmetic. Each branch's {@code only_if}
+     * conditions are recorded as spec sites under the branch's location.
      */
-    private List<WeightedNext> readBranches(Fields fields, String where) {
+    private List<WeightedNext> readBranches(Fields fields, String nodeId, String where) {
         Optional<JsonArray> array = fields.optional("random", JsonValues::array);
         if (array.isEmpty()) {
             return List.of();
@@ -138,13 +140,18 @@ final class NodeReader {
             branch.allowOnly(BRANCH_KEYS);
             Optional<String> node = branch.required("node", JsonValues::string);
             Optional<Integer> weight = branch.required("weight", JsonValues::integer);
+            List<ConditionSpec> onlyIf = branch.list("only_if", SpecReader::condition);
             node.ifPresent(target -> requireNode(target, "node", entryWhere));
             weight.filter(value -> value <= 0).ifPresent(value -> branch.add("weight must be above 0"));
             if (weight.isPresent() && weight.get() > 0) {
                 total += weight.get();
             }
+            for (ConditionSpec condition : onlyIf) {
+                specs.add(new SpecSite(
+                        SpecSite.Kind.CONDITION, graph, nodeId, entryWhere, condition.type(), condition.args()));
+            }
             if (node.isPresent() && weight.isPresent() && weight.get() > 0 && nodeIds.contains(node.get())) {
-                branches.add(new WeightedNext(node.get(), weight.get()));
+                branches.add(new WeightedNext(node.get(), weight.get(), onlyIf));
             }
         }
         if (total > Integer.MAX_VALUE) {
