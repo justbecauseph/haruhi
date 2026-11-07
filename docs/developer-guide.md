@@ -22,6 +22,7 @@ guide](content-guide.md), and the model pipeline in [models and animations](mode
 | content | `town.lampas.haruhi.content`, `content.model` | `ContentModule`: bundle parsing and validation, canonical JSON and SHA-256 digest, revisions, the startup load, `/haruhi content` | storage, `DialogueRegistries` |
 | dialogue | `town.lampas.haruhi.dialogue` and its subpackages, `town.lampas.haruhi.mixin` | `DialogueModule`: sessions, the graph runner, the built-ins, the flag and visit cache with write-behind, payload receivers, the vanilla dialog presenter, `/haruhi dialogue` and `/haruhi flags` | content, storage, npc, network |
 | npc | `town.lampas.haruhi.npc` | `NpcModule`: the `haruhi:npc` entity type, look and profile syncing, interaction, `/haruhi npc`, `NpcControl` | content, dialogue, network |
+| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings (per-dimension saved data `BlockBindings`), entity bindings (the persistent attachment `haruhi:binding`, `EntityBindings`), the server-side use callbacks that open a bound graph in place of the vanilla interaction, the block-break listener, `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings` | content, dialogue, npc |
 | network | `town.lampas.haruhi.network` | the payload records and `HaruhiNetworking.registerPayloadTypes` | nothing |
 | client | `town.lampas.haruhi.client` | `NpcClient`: the GeckoLib renderer, the vanilla fallback renderer, the animation receiver. `DialogueClient`: the visual-novel screen and `DialogueHud`. | network, npc entity class |
 
@@ -34,6 +35,7 @@ guide](content-guide.md), and the model pipeline in [models and animations](mode
 3. `ContentModule.init()`
 4. `DialogueModule.init()`
 5. `NpcModule.init()`
+6. `BindingModule.init()`
 
 `HaruhiClient.onInitializeClient`, the client entrypoint, runs `NpcClient.init()` and then `DialogueClient.init()`.
 
@@ -69,6 +71,10 @@ Listeners run in registration order, which follows the initialisation order.
 | `ServerPlayerEvents.LEAVE` | dialogue: drop the session and the cache, flush the player's pending flags |
 | `SERVER_STOPPING` | dialogue: drop every session, flush every batch and wait up to 10 seconds; log rewards that are still waiting |
 | `SERVER_STOPPED` | storage: close (queued work gets a 10-second grace). content: back to the empty bundle. npc: forget the server. |
+| `ServerLevelEvents.LOAD` | binding: read the dimension's block bindings |
+| `UseBlockCallback`, `UseEntityCallback` | binding: a bound block or entity opens its graph and the vanilla interaction is skipped (see the [server guide](server-guide.md#binding-behaviour)) |
+| `UseItemCallback` | binding: refuse the held item's use in the tick a binding consumed a use and the next |
+| `PlayerBlockBreakEvents.BEFORE`, `AFTER`, `END_SERVER_TICK` | binding: note a bound block a player is breaking (and the other half of a door, tall plant or bed), then remove its binding once the block is gone. The tick's end catches a creative player breaking a door's upper half, which fires no `AFTER` |
 
 A singleplayer client can start several servers in one JVM. Storage, content and the queues reset on each stop, so the
 next start begins clean.
@@ -182,7 +188,15 @@ compiled graph it opened with, so a content activation does not change a convers
 on first use, and compiled again on their first use after each activation.
 
 The node's `animation` is played by the conversing player's own client on the speaker entity, from the payload. The
-`haruhi:animation` action instead sends `NpcAnimationPayload` to every player tracking the NPC.
+`haruhi:animation` action instead sends `NpcAnimationPayload` to every player tracking the NPC. Both apply only to a
+`haruhi:npc`; on any other interlocutor, such as a bound villager, they do nothing.
+
+A bound block or entity goes through the same service: `BindingInteractions` calls `openAt` with an anchor on the
+block's centre (8 blocks) or `open` with the entity as the interlocutor, each with a `DialogueSpeaker` made of the
+binding's speaker profile and the block's or entity's name. The Fabric use callbacks run before vanilla, so returning a
+non-`PASS` result skips the container, trade screen or item use. The client does not know the bindings: when its own
+guess of the block or entity use passes, it goes on to send a use of the held item, which `UseItemCallback` refuses in
+that tick and the next.
 
 ## Network payloads
 
@@ -198,7 +212,8 @@ Every payload type is registered on both sides by `HaruhiNetworking.registerPayl
 
 `ChoiceView` is `index` varint, `text` component, `enabled` boolean, `unavailableReason` optional component. Hidden
 choices are left out of the list. Grayed-out choices stay in it with `enabled` false, so the indices after them do not
-move when they become available. `speakerEntityId` is set only when the NPC the player talks to is the node's speaker.
+move when they become available. `speakerEntityId` is set only when the entity the player talks to (an NPC, or a
+bound entity) is the node's speaker.
 `portrait` is the node's portrait, else the speaker profile's.
 
 A client without the `haruhi:dialogue_node` channel gets vanilla dialogs instead (`dialogue.presenter.VanillaDialogs`):
@@ -386,12 +401,12 @@ and only on the server thread.
 | Member | Gives or does |
 |---|---|
 | `player()` | the `ServerPlayer` in the conversation |
-| `interlocutor()` | the entity the player talks to; empty for a conversation opened by a command or block |
+| `interlocutor()` | the entity the player talks to: an NPC, or any entity a binding opened the graph on; empty for a conversation opened at a block or by a command |
 | `anchor()` | the `DialogueAnchor` of a conversation opened with `openAt`; empty otherwise |
 | `graphId()`, `nodeId()` | the graph, and the node being entered or whose choice was picked |
 | `content()` | the bundle the conversation runs on |
 | `flags()` | the player's `DialogueFlags`: `get`, `isSet`, `set`, `add`, `clear` on a `FlagKey(namespace, flag)` |
-| `visits()` | how many times this character has opened this graph with this NPC, counting the current conversation |
+| `visits()` | how many times this character has opened this graph with this NPC profile (the interlocutor NPC's, else the `DialogueSpeaker` profile, else `haruhi:none`), counting the current conversation |
 | `goTo(nodeId)` | after the current actions, enter this node instead of the choice's `next` |
 | `end()` | after the current actions, close the conversation |
 | `openGraph(graphId)` | after the current actions, close this conversation and open another graph with the same interlocutor |
@@ -459,6 +474,7 @@ should be immutable, because every reader of the active bundle shares it.
 |---|---|
 | `HaruhiServices.dialogue().open(player, graphId, interlocutor)` | opens a graph of the active content; `interlocutor` may be null. Returns false when the graph is not in the active content. Closes the player's current conversation. |
 | `HaruhiServices.dialogue().openAt(player, graphId, anchor)` | opens a graph tied to a place: a `DialogueAnchor(dimension, position, maxDistance)`, with `maxDistance` above 0 and at most 64 blocks. The conversation ends when the player changes dimension or moves farther than `maxDistance` from `position`, and a pick sent from farther away ends it without running. A graph chained with `haruhi:open` keeps the anchor. Use it for a block such as a notice board. |
+| `open(player, graphId, interlocutor, speaker)`, `openAt(player, graphId, anchor, speaker)` | the same, with a `DialogueSpeaker(profile, name)` for the nodes that name no `speaker`: they show the profile's name and portrait, else `name`, and the interlocutor is drawn as their headshot. `DialogueSpeaker.of(Optional.empty(), block.getName())` is what a block binding passes. The three-argument forms pass `DialogueSpeaker.NONE`, where a `haruhi:npc` interlocutor speaks with its own profile. A chained `haruhi:open` keeps the speaker. |
 | `HaruhiServices.dialogue().close(player)` | ends the conversation, or cancels one waiting for the player's flags |
 | `HaruhiServices.dialogue().isInDialogue(player)` | true while a conversation is open or waiting for flags |
 | `HaruhiServices.content().active()` | the active `ContentBundle`; `ContentBundle.EMPTY` before any is active |
@@ -536,6 +552,10 @@ Minecraft server. `test` depends on `classes` and passes the compiled main class
   presenters and the graph runner. `BuiltinSchemaTest` checks that the schema lists exactly the registered `haruhi:`
   conditions and actions and gives the same verdict as their parsers on a set of argument cases.
 - `npc/`: commands, facing and look syncing.
+- `binding/`: the saved form of block bindings and its tolerant load, which block states a binding applies to, the
+  other half of doors, tall plants, beds and double chests, the
+  problems `/haruhi bindings` marks, and the command tree's permission gate. The speaker rules of a bound conversation
+  are in `dialogue/presenter/SpeakerTest`.
 - `client/`: the screen's layout, keys, HUD decisions and typewriter, the client config, headshot framing, and the
   GeckoLib renderer.
 - `tools/bbmodel/`: the converter, including `GeckoLibBakeTest`, which has GeckoLib 5.5.5 bake converted output.
@@ -562,7 +582,14 @@ The `gametest` source set and the `runGameTest` task come from `fabricApi { conf
 `build.gradle`, with mod id `haruhi-gametest`. Client GameTests are disabled.
 
 - Entrypoints, listed in `src/gametest/resources/fabric.mod.json`: `StorageGameTests`, `ContentGameTests`,
-  `NpcGameTests`, `DialogueGameTests`, in `town.lampas.haruhi.gametest`.
+  `NpcGameTests`, `DialogueGameTests`, `BindingGameTests`, in `town.lampas.haruhi.gametest`.
+- `BindingGameTests` binds a chest and a librarian with the real commands, uses them as the server handles a client's
+  use (`handleInteract` for the entity, `ServerPlayerGameMode.useItemOn` for the block, because the packet handler
+  drops block uses until a client confirms its join teleport, which a mock player never does), and checks that the
+  conversation opens and the chest's inventory or the trades do not, that unbinding brings them back, that a missing
+  graph opens nothing and is listed, that a held item's use right after a consumed click is refused, that a broken
+  block loses its binding and a replaced one waits for its block, that a door, a bed and a double chest answer on both
+  halves with one binding, and that an entity binding is saved with the entity.
 - Fixtures: `src/gametest/resources/haruhi/fixtures/<component>/`. Test environments:
   `src/gametest/resources/data/haruhi-gametest/test_environment/`.
 - A test that activates its own content first waits until `HaruhiServices.content().isStartupComplete()`, so the
@@ -604,6 +631,7 @@ src/main/java/town/lampas/haruhi/
   mixin/                       DialogueClickMixin
   network/                     payload records and HaruhiNetworking
   npc/                         NpcEntity, NpcLook, NpcControl, /haruhi npc
+  binding/                     block and entity bindings, their use callbacks, /haruhi bind, unbind and bindings
   client/                      HaruhiClient, the client entrypoint
   client/dialogue/             DialogueScreen, DialogueHud, layout, keys, typewriter, client config
   client/npc/                  vanilla renderer, headshot, asset fallback

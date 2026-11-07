@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "npcs": {
+    "haruhi:fixture/bound_clerk": {
+      "name": "Bound Clerk",
+      "texture": "minecraft:textures/entity/player/wide/steve.png"
+    }
+  },
+  "dialogues": {
+    "haruhi:fixture/bound": {
+      "start": "hello",
+      "nodes": {
+        "hello": { "text": "You found a bound conversation." }
+      }
+    }
+  }
+}

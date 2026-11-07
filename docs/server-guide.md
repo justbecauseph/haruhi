@@ -32,6 +32,10 @@ guide](content-guide.md); models and textures are in [models and animations](mod
   that shares its schema until that server restarts.
 - Flag changes reach storage in batches every 100 ticks (5 seconds at 20 ticks per second), so a crash loses the
   changes made since the last batch.
+- `/haruhi bindings` lists bound entities only while they are loaded; an entity binding is saved on the entity, and
+  nothing indexes it elsewhere.
+- Bindings are not synced to clients, so a client may briefly show its own guess of a bound block's vanilla use, such
+  as a door swinging open, before the server puts it back.
 
 ## Install
 
@@ -292,8 +296,9 @@ exists, so later edits to `config/haruhi/bundle.json` have no effect. Deploy new
 Every `/haruhi` command needs permission level 2 (game master) or higher; a GameTest walks the command tree to check
 this. Replies are plain text. Failures come back as red lines, one line per problem.
 
-The success messages of `/haruhi dialogue`, `/haruhi flags set` and `clear`, and `/haruhi npc spawn`, `set` and
-`remove` are also shown to other operators, as vanilla commands do. The other commands reply only to you.
+The success messages of `/haruhi dialogue`, `/haruhi flags set` and `clear`, `/haruhi npc spawn`, `set` and
+`remove`, and `/haruhi bind` and `unbind` are also shown to other operators, as vanilla commands do. The other commands
+reply only to you.
 
 Arguments that are a plain string, such as the flag namespace, must be quoted when they contain anything other than
 letters, digits, `_`, `-`, `.` and `+`. Flag namespaces such as `haruhi:example/greeter` contain `:` and `/`, so write
@@ -418,6 +423,85 @@ entity is not an NPC). With no NPC loaded, `list` replies `No NPCs are loaded`.
   not the model. The client places the name tag just above the model.
 - The profile id and the last look are saved with the entity, so an NPC shows its look as soon as it loads.
 
+### /haruhi bind, unbind and bindings
+
+A binding attaches a graph of the active content to a placed block or to an existing entity that is not a Haruhi NPC: a
+vanilla villager, an armor stand, a mob, an `interaction` entity. A player who uses that block or entity opens the
+conversation, as with an NPC.
+
+| Command | What it does |
+|---|---|
+| `/haruhi bind block <pos> <graph> [<speaker>]` | Binds the block at `<pos>` in your dimension. Replaces any binding the block had, on either half of a door, bed or double chest. |
+| `/haruhi bind entity <targets> <graph> [<speaker>]` | Binds each selected entity. Players and Haruhi NPCs are skipped. |
+| `/haruhi unbind block <pos>` | Removes the binding at `<pos>`, also in an unloaded chunk, or the binding of the block's other half (door, bed, double chest) in a loaded one. |
+| `/haruhi unbind entity <targets>` | Removes the bindings of the selected entities. |
+| `/haruhi bindings` | Lists the block bindings and loaded bound entities within 32 blocks of where the command runs, in its dimension. |
+| `/haruhi bindings all` | Lists every block binding in every dimension, and every bound entity that is loaded. |
+
+`<graph>` must be a graph of the active content, and `<speaker>`, when given, an NPC profile of it; tab completion
+lists both. `<speaker>` names the character that speaks for the block or entity: its name and portrait show on nodes
+that name no `speaker`, and visits count under it. Without it the block's or entity's own name shows, such as
+"Lectern", "Librarian" or a name tag's name. `<pos>` must be a loaded block that is not air. Replies:
+
+```
+> /haruhi bind block 12 64 -3 haruhi:example/greeter
+Bound minecraft:lectern at 12 64 -3 in minecraft:overworld to haruhi:example/greeter
+
+> /haruhi bind entity @e[type=villager,sort=nearest,limit=1] haruhi:example/greeter haruhi:example/greeter
+Bound minecraft:villager "Librarian" 4f3c2a1e-... in minecraft:overworld at 10.50 64.00 -1.50 to haruhi:example/greeter, speaker haruhi:example/greeter
+
+> /haruhi bindings
+Haruhi bindings within 32 blocks: 1 block, 1 loaded entity, 1 with problems
+block minecraft:lectern at 12 64 -3 in minecraft:overworld -> haruhi:example/greeter [missing graph]
+entity minecraft:villager "Librarian" 4f3c2a1e-... in minecraft:overworld at 10.50 64.00 -1.50 -> haruhi:example/greeter, speaker haruhi:example/greeter
+
+> /haruhi unbind block 12 64 -3
+Unbound minecraft:lectern at 12 64 -3 in minecraft:overworld from haruhi:example/greeter
+```
+
+The listing marks a binding that does not work as it was made: `[missing graph]` when the active content lacks its
+graph, `[missing speaker profile]` when it lacks its speaker profile, and `[block is now <id>]` when another block
+stands at the position. A block binding in an unloaded chunk is listed with `(chunk not loaded)`, unchecked for its
+block. Entities are listed only while loaded, because entity bindings are saved with the entities themselves.
+
+Failures: `Unknown dialogue graph <id>`, `Unknown NPC profile <id>`, `There is no block at <pos>`, `No block binding at
+<pos>`, `None of the selected entities has a binding`, and `No entity was bound; skipped 1 player` (or `1 Haruhi NPC,
+which talks through its profile`). An NPC's conversation comes from its profile's `dialogue`, so a Haruhi NPC cannot be
+bound.
+
+### Binding behaviour
+
+- Using a bound block or entity with the main hand opens its graph, whatever the player holds, sneaking or not. It
+  replaces the vanilla interaction: no container, trade screen, item use or block placement against the block. The
+  held item's own use that a client sends right after (a bucket emptied, an ender pearl thrown, food eaten) is refused
+  for that tick and the next, and the player's inventory is sent again. The off hand gets nothing, and so does a fake
+  player from another mod (a machine that uses blocks). Spectators get the vanilla interaction.
+- A binding whose graph the active content lacks gives the player nothing: no conversation and no vanilla interaction.
+  Staff see it as `[missing graph]` in `/haruhi bindings`. A missing speaker profile only changes the name shown.
+- A block conversation is tied to the block's position, like a notice board's: it ends when the player moves more than
+  8 blocks from the block's centre (more for a player whose block reach is above 5 blocks: their reach plus 3, up to
+  64), changes dimension, dies or leaves. It does not end when the block is broken meanwhile.
+- An entity conversation is tied to the entity: it ends when the entity is more than 8 blocks from the player, dies or
+  changes dimension, or when the player dies or leaves. The entity keeps doing what it does, so give a mob that should
+  stay put `NoAI`. Actions that need a Haruhi NPC, such as `haruhi:animation`, do nothing on other entities.
+- The client does not know the bindings, so for a moment it may show its own guess of the vanilla result, such as a
+  door swinging open; the server's block update puts it back.
+- Block bindings are saved per dimension, in that dimension's `data/haruhi/block_bindings.dat`. A binding records the
+  block that was there when it was bound and applies only while that block is at the position, in any state (a
+  furnace that lights, a door that opens). A player who breaks the block removes its binding, and an operator who does
+  is told so. Any other change (an explosion, a piston, fluid, `/setblock`, `/fill`) leaves the binding in place but
+  inactive, shown as `[block is now <id>]`, until the same block is back; breaking another block that stands there
+  meanwhile does not remove it. A binding does not follow a block a piston moves.
+- A block that takes two positions has one binding for both: a door or tall plant (lower and upper half), a bed (foot
+  and head), a double chest (its two chests). Bind either half; using either half opens the conversation, and binding
+  the other half later replaces the binding. `/haruhi unbind block` takes either half's position while the chunk is
+  loaded. The binding is saved at the position you bound, which is the one `/haruhi bindings` shows. Breaking a door,
+  tall plant or bed removes the binding whichever half was broken. Breaking one chest of a double chest leaves the other
+  chest standing, so a binding saved on that chest stays.
+- An entity binding is saved on the entity, as the Fabric data attachment `haruhi:binding`. It moves with the entity,
+  across dimensions too, and goes when the entity dies or is removed. It does not survive a conversion: a villager
+  struck by lightning, a zombie villager that is cured, a mob that drowns into another kind.
+
 ## Content revisions
 
 ### Deploying a bundle
@@ -469,6 +553,9 @@ The bundle town.json links outside /srv/minecraft/config/haruhi/bundles
   without an always-visible name tag, and does nothing when right-clicked.
 - A conversation that is already open keeps running on the content it opened with until it ends. Every conversation
   opened afterwards, including one opened by `haruhi:open` from an old conversation, uses the new content.
+- Bindings are not part of a revision and are not changed by an activation. Each use looks its graph up in the active
+  content; a binding whose graph the new content lacks opens nothing until a revision has it again. Run `/haruhi
+  bindings all` after an activation to find them.
 - Stored flag values are not touched. The active revision's declarations decide which flags conditions, actions and
   `/haruhi flags` may use.
 - Models, textures, animations and portraits are not part of a revision. They come from resource packs or mods on

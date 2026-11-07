@@ -4,6 +4,7 @@ import net.fabricmc.api.ModInitializer;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import town.lampas.haruhi.binding.BindingModule;
 import town.lampas.haruhi.content.ContentModule;
 import town.lampas.haruhi.dialogue.DialogueModule;
 import town.lampas.haruhi.network.HaruhiNetworking;
@@ -29,5 +30,6 @@ public final class Haruhi implements ModInitializer {
         ContentModule.init();
         DialogueModule.init();
         NpcModule.init();
+        BindingModule.init();
     }
 }
