@@ -17,6 +17,8 @@ import java.util.stream.Stream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 import town.lampas.haruhi.Haruhi;
@@ -58,6 +60,23 @@ public final class BlockBindings extends SavedData {
     public Optional<BlockBinding> get(BlockPos pos) {
         return Optional.ofNullable(bindings.get(pos));
     }
+
+    /**
+     * The binding that applies to {@code state} at {@code pos}: the position's own, else, for a block that takes two
+     * positions (a door, a bed, a double chest), the binding of its other half. Either must still match the block.
+     */
+    public Optional<Found> covering(BlockGetter level, BlockPos pos, BlockState state) {
+        Optional<BlockBinding> own = get(pos).filter(binding -> binding.matches(state));
+        if (own.isPresent()) {
+            return Optional.of(new Found(pos.immutable(), own.get()));
+        }
+        return BlockParts.connectedHalf(level, pos, state)
+                .flatMap(other -> get(other).filter(binding -> binding.matches(state))
+                        .map(binding -> new Found(other, binding)));
+    }
+
+    /** A binding and the position it is saved at, which for a two-position block may be the other half's. */
+    public record Found(BlockPos pos, BlockBinding binding) {}
 
     /** Binds the position, replacing any binding it had, which is returned. */
     public Optional<BlockBinding> put(BlockPos pos, BlockBinding binding) {

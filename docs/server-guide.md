@@ -431,9 +431,9 @@ conversation, as with an NPC.
 
 | Command | What it does |
 |---|---|
-| `/haruhi bind block <pos> <graph> [<speaker>]` | Binds the block at `<pos>` in your dimension. Replaces any binding the position had. |
+| `/haruhi bind block <pos> <graph> [<speaker>]` | Binds the block at `<pos>` in your dimension. Replaces any binding the block had, on either half of a door, bed or double chest. |
 | `/haruhi bind entity <targets> <graph> [<speaker>]` | Binds each selected entity. Players and Haruhi NPCs are skipped. |
-| `/haruhi unbind block <pos>` | Removes the binding at `<pos>`, also in an unloaded chunk. |
+| `/haruhi unbind block <pos>` | Removes the binding at `<pos>`, also in an unloaded chunk, or the binding of the block's other half (door, bed, double chest) in a loaded one. |
 | `/haruhi unbind entity <targets>` | Removes the bindings of the selected entities. |
 | `/haruhi bindings` | Lists the block bindings and loaded bound entities within 32 blocks of where the command runs, in its dimension. |
 | `/haruhi bindings all` | Lists every block binding in every dimension, and every bound entity that is loaded. |
@@ -492,9 +492,12 @@ bound.
   is told so. Any other change (an explosion, a piston, fluid, `/setblock`, `/fill`) leaves the binding in place but
   inactive, shown as `[block is now <id>]`, until the same block is back; breaking another block that stands there
   meanwhile does not remove it. A binding does not follow a block a piston moves.
-- A binding covers one position. A double chest is two: bind both halves, or the unbound half opens the shared
-  inventory, items of the bound half included. A door or bed is two blocks as well; bind both halves. Breaking one half
-  breaks the other through a block update, not a player's break, so that half's binding stays, inactive.
+- A block that takes two positions has one binding for both: a door or tall plant (lower and upper half), a bed (foot
+  and head), a double chest (its two chests). Bind either half; using either half opens the conversation, and binding
+  the other half later replaces the binding. `/haruhi unbind block` takes either half's position while the chunk is
+  loaded. The binding is saved at the position you bound, which is the one `/haruhi bindings` shows. Breaking a door,
+  tall plant or bed removes the binding whichever half was broken. Breaking one chest of a double chest leaves the other
+  chest standing, so a binding saved on that chest stays.
 - An entity binding is saved on the entity, as the Fabric data attachment `haruhi:binding`. It moves with the entity,
   across dimensions too, and goes when the entity dies or is removed. It does not survive a conversion: a villager
   struck by lightning, a zombie villager that is cured, a mob that drowns into another kind.

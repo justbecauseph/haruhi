@@ -4,6 +4,7 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
@@ -23,7 +24,9 @@ public final class BindingModule {
         UseBlockCallback.EVENT.register(BindingInteractions::useBlock);
         UseEntityCallback.EVENT.register(BindingInteractions::useEntity);
         UseItemCallback.EVENT.register(BindingInteractions::useItem);
+        PlayerBlockBreakEvents.BEFORE.register(BindingInteractions::beforeBreak);
         PlayerBlockBreakEvents.AFTER.register(BindingInteractions::afterBreak);
+        ServerTickEvents.END_SERVER_TICK.register(server -> BindingInteractions.settleBreaks());
         // Each dimension's bindings are read from disk as it loads, not on the first use in play.
         ServerLevelEvents.LOAD.register((server, level) -> BlockBindings.of(level));
         ServerPlayerEvents.LEAVE.register(BindingInteractions::forget);

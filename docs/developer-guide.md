@@ -74,7 +74,7 @@ Listeners run in registration order, which follows the initialisation order.
 | `ServerLevelEvents.LOAD` | binding: read the dimension's block bindings |
 | `UseBlockCallback`, `UseEntityCallback` | binding: a bound block or entity opens its graph and the vanilla interaction is skipped (see the [server guide](server-guide.md#binding-behaviour)) |
 | `UseItemCallback` | binding: refuse the held item's use in the tick a binding consumed a use and the next |
-| `PlayerBlockBreakEvents.AFTER` | binding: a player broke a bound block, so its binding is removed |
+| `PlayerBlockBreakEvents.BEFORE`, `AFTER`, `END_SERVER_TICK` | binding: note a bound block a player is breaking (and the other half of a door, tall plant or bed), then remove its binding once the block is gone. The tick's end catches a creative player breaking a door's upper half, which fires no `AFTER` |
 
 A singleplayer client can start several servers in one JVM. Storage, content and the queues reset on each stop, so the
 next start begins clean.
@@ -553,6 +553,7 @@ Minecraft server. `test` depends on `classes` and passes the compiled main class
   conditions and actions and gives the same verdict as their parsers on a set of argument cases.
 - `npc/`: commands, facing and look syncing.
 - `binding/`: the saved form of block bindings and its tolerant load, which block states a binding applies to, the
+  other half of doors, tall plants, beds and double chests, the
   problems `/haruhi bindings` marks, and the command tree's permission gate. The speaker rules of a bound conversation
   are in `dialogue/presenter/SpeakerTest`.
 - `client/`: the screen's layout, keys, HUD decisions and typewriter, the client config, headshot framing, and the
@@ -587,7 +588,8 @@ The `gametest` source set and the `runGameTest` task come from `fabricApi { conf
   drops block uses until a client confirms its join teleport, which a mock player never does), and checks that the
   conversation opens and the chest's inventory or the trades do not, that unbinding brings them back, that a missing
   graph opens nothing and is listed, that a held item's use right after a consumed click is refused, that a broken
-  block loses its binding and a replaced one waits for its block, and that an entity binding is saved with the entity.
+  block loses its binding and a replaced one waits for its block, that a door, a bed and a double chest answer on both
+  halves with one binding, and that an entity binding is saved with the entity.
 - Fixtures: `src/gametest/resources/haruhi/fixtures/<component>/`. Test environments:
   `src/gametest/resources/data/haruhi-gametest/test_environment/`.
 - A test that activates its own content first waits until `HaruhiServices.content().isStartupComplete()`, so the

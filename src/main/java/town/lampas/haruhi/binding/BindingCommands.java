@@ -104,8 +104,11 @@ final class BindingCommands {
         }
         Binding binding = checked(context, speaker);
         BlockBinding bound = new BlockBinding(binding.graph(), binding.speaker(), BlockBinding.blockId(state));
-        Optional<BlockBinding> previous = BlockBindings.of(level).put(pos, bound);
-        String replaced = previous.map(old -> ", replacing " + old.graph()).orElse("");
+        BlockBindings bindings = BlockBindings.of(level);
+        Optional<BlockBinding> previous = bindings.put(pos, bound);
+        // One binding per block: binding one half of a door, bed or double chest replaces the other half's.
+        Optional<BlockBinding> otherHalf = BlockParts.connectedHalf(level, pos, state).flatMap(bindings::remove);
+        String replaced = previous.or(() -> otherHalf).map(old -> ", replacing " + old.graph()).orElse("");
         source.sendSuccess(() -> Component.literal("Bound " + bound.block() + " at " + describe(level, pos) + " to "
                 + bound.graph() + BindingProblems.speakerSuffix(bound.speaker()) + replaced), true);
         return Command.SINGLE_SUCCESS;
@@ -142,10 +145,15 @@ final class BindingCommands {
         CommandSourceStack source = context.getSource();
         ServerLevel level = source.getLevel();
         // No loaded check: a binding is saved data, so one in an unloaded chunk can be removed too.
-        BlockPos pos = BlockPosArgument.getBlockPos(context, "pos");
-        Optional<BlockBinding> removed = BlockBindings.of(level).remove(pos);
+        BlockPos given = BlockPosArgument.getBlockPos(context, "pos");
+        BlockBindings bindings = BlockBindings.of(level);
+        // A binding of a door, bed or double chest may be saved on the other half; that half is found while loaded.
+        BlockPos pos = bindings.get(given).isPresent() || !level.isLoaded(given)
+                ? given
+                : BlockParts.connectedHalf(level, given, level.getBlockState(given)).orElse(given);
+        Optional<BlockBinding> removed = bindings.remove(pos);
         if (removed.isEmpty()) {
-            throw fail("No block binding at " + describe(level, pos));
+            throw fail("No block binding at " + describe(level, given));
         }
         source.sendSuccess(() -> Component.literal("Unbound " + removed.get().block() + " at " + describe(level, pos)
                 + " from " + removed.get().graph()), true);

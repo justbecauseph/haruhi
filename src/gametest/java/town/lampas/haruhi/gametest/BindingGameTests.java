@@ -36,7 +36,14 @@ import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
@@ -69,6 +76,8 @@ public final class BindingGameTests {
     private static final String WITHOUT_GRAPH = "/haruhi/fixtures/binding/bundle_without_graph.json";
     private static final BlockPos CHEST_AT = new BlockPos(2, 1, 2);
     private static final Vec3 VILLAGER_AT = new Vec3(2.5, 1.0, 4.5);
+    private static final BlockPos DOOR_AT = new BlockPos(1, 1, 4);
+    private static final BlockPos BED_FOOT_AT = new BlockPos(5, 1, 3);
 
     @GameTest(maxTicks = 200)
     public void aBoundChestOpensItsConversationInsteadOfItsInventory(GameTestHelper helper) {
@@ -283,6 +292,104 @@ public final class BindingGameTests {
                     helper.assertTrue(unknown.contains("Unknown dialogue graph"), "an unknown graph is refused");
                     npc.discard();
                     villager.discard();
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A door is two blocks. A binding made on either half answers on both and is the door's only binding, either half's
+     * position unbinds it, and breaking the door removes it.
+     */
+    @GameTest(maxTicks = 200)
+    public void aDoorBoundOnOneHalfAnswersOnBothAndBreaksAsOne(GameTestHelper helper) {
+        Scene scene = new Scene();
+        join(helper, scene)
+                .thenExecute(() -> {
+                    ServerLevel level = helper.getLevel();
+                    BlockState lowerState = Blocks.OAK_DOOR.defaultBlockState()
+                            .setValue(DoorBlock.FACING, Direction.NORTH).setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER);
+                    helper.setBlock(DOOR_AT, lowerState);
+                    helper.setBlock(DOOR_AT.above(), lowerState.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER));
+                    BlockPos lower = helper.absolutePos(DOOR_AT);
+                    BlockPos upper = lower.above();
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind block " + coords(lower) + " " + BOUND);
+
+                    useBlock(scene.player, upper, InteractionHand.MAIN_HAND);
+                    requireSession(helper, scene.player);
+                    helper.assertFalse(level.getBlockState(lower).getValue(DoorBlock.OPEN),
+                            "the bound door does not open from its upper half");
+                    HaruhiServices.dialogue().close(scene.player);
+
+                    command(helper, "haruhi bind block " + coords(upper) + " " + BOUND);
+                    helper.assertTrue(BlockBindings.of(level).get(upper).isPresent()
+                                    && BlockBindings.of(level).get(lower).isEmpty(),
+                            "binding the other half replaces the door's binding");
+                    command(helper, "haruhi unbind block " + coords(lower));
+                    helper.assertTrue(BlockBindings.of(level).get(upper).isEmpty(),
+                            "the lower half's position unbinds the binding saved on the upper half");
+
+                    command(helper, "haruhi bind block " + coords(lower) + " " + BOUND);
+                    helper.assertTrue(scene.player.gameMode.destroyBlock(upper), "the player breaks the upper half");
+                    helper.assertTrue(level.getBlockState(lower).isAir(), "the whole door is gone");
+                })
+                // A creative player's break of the upper half fires no AFTER event; the binding goes at the tick's end.
+                .thenExecuteAfter(1, () -> helper.assertTrue(
+                        BlockBindings.of(helper.getLevel()).get(helper.absolutePos(DOOR_AT)).isEmpty(),
+                        "breaking the upper half removes the binding saved on the lower half"))
+                .thenSucceed();
+    }
+
+    /**
+     * A bed and a double chest are two blocks too: a binding on one half answers on the other. Breaking one chest of a
+     * double chest leaves the other standing, with its binding.
+     */
+    @GameTest(maxTicks = 200)
+    public void aBedAndADoubleChestAnswerOnBothHalves(GameTestHelper helper) {
+        Scene scene = new Scene();
+        join(helper, scene)
+                .thenExecute(() -> {
+                    ServerLevel level = helper.getLevel();
+                    BlockState foot = Blocks.BED.red().defaultBlockState()
+                            .setValue(BedBlock.FACING, Direction.NORTH).setValue(BedBlock.PART, BedPart.FOOT);
+                    helper.setBlock(BED_FOOT_AT, foot);
+                    BlockPos footPos = helper.absolutePos(BED_FOOT_AT);
+                    BlockPos headPos = footPos.relative(BedBlock.getConnectedDirection(foot));
+                    level.setBlockAndUpdate(headPos, foot.setValue(BedBlock.PART, BedPart.HEAD));
+
+                    BlockState left = Blocks.CHEST.defaultBlockState()
+                            .setValue(ChestBlock.FACING, Direction.NORTH).setValue(ChestBlock.TYPE, ChestType.LEFT);
+                    helper.setBlock(CHEST_AT, left);
+                    BlockPos leftPos = helper.absolutePos(CHEST_AT);
+                    BlockPos rightPos = ChestBlock.getConnectedBlockPos(leftPos, left);
+                    level.setBlockAndUpdate(rightPos, left.setValue(ChestBlock.TYPE, ChestType.RIGHT));
+                    useBlock(scene.player, rightPos, InteractionHand.MAIN_HAND);
+                    helper.assertTrue(scene.player.containerMenu instanceof ChestMenu chest
+                                    && chest.getRowCount() == 6,
+                            "unbound, the right half opens the double chest");
+                    scene.player.closeContainer();
+
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind block " + coords(headPos) + " " + BOUND);
+                    useBlock(scene.player, footPos, InteractionHand.MAIN_HAND);
+                    requireSession(helper, scene.player);
+                    HaruhiServices.dialogue().close(scene.player);
+
+                    command(helper, "haruhi bind block " + coords(leftPos) + " " + BOUND);
+                    useBlock(scene.player, rightPos, InteractionHand.MAIN_HAND);
+                    requireSession(helper, scene.player);
+                    helper.assertTrue(scene.player.containerMenu == scene.player.inventoryMenu,
+                            "the unbound half does not open the bound double chest");
+                    HaruhiServices.dialogue().close(scene.player);
+
+                    helper.assertTrue(scene.player.gameMode.destroyBlock(rightPos), "the player breaks the right chest");
+                    helper.assertTrue(BlockBindings.of(level).get(leftPos).isPresent(),
+                            "the chest left standing keeps its binding");
+                    useBlock(scene.player, leftPos, InteractionHand.MAIN_HAND);
+                    requireSession(helper, scene.player);
+                    HaruhiServices.dialogue().close(scene.player);
+                    command(helper, "haruhi unbind block " + coords(headPos));
+                    command(helper, "haruhi unbind block " + coords(leftPos));
                 })
                 .thenSucceed();
     }

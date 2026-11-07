@@ -1,6 +1,8 @@
 package town.lampas.haruhi.binding;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -53,6 +55,8 @@ final class BindingInteractions {
     static final int ITEM_USE_WINDOW_TICKS = 1;
     /** The server tick in which a binding last consumed each player's use. Server thread only. */
     private static final Map<UUID, Integer> CONSUMED_AT = new HashMap<>();
+    /** Bound blocks players are breaking in this tick, noted before each break. Server thread only. */
+    private static final List<PendingBreak> PENDING_BREAKS = new ArrayList<>();
 
     private BindingInteractions() {}
 
@@ -64,7 +68,7 @@ final class BindingInteractions {
         }
         BlockPos pos = hit.getBlockPos();
         BlockState state = serverLevel.getBlockState(pos);
-        Optional<BlockBinding> found = BlockBindings.of(serverLevel).get(pos).filter(binding -> binding.matches(state));
+        Optional<BlockBindings.Found> found = BlockBindings.of(serverLevel).covering(serverLevel, pos, state);
         if (found.isEmpty()) {
             return InteractionResult.PASS;
         }
@@ -73,7 +77,7 @@ final class BindingInteractions {
                 || !serverPlayer.isWithinBlockInteractionRange(pos, BLOCK_RANGE_SLACK)) {
             return InteractionResult.CONSUME;
         }
-        BlockBinding binding = found.get();
+        BlockBinding binding = found.get().binding();
         DialogueAnchor anchor = new DialogueAnchor(serverLevel.dimension(), Vec3.atCenterOf(pos),
                 anchorReach(serverPlayer));
         DialogueSpeaker speaker = DialogueSpeaker.of(binding.speaker(), state.getBlock().getName());
@@ -116,6 +120,7 @@ final class BindingInteractions {
     /** Forgets every consumed use, when the server stops, so a later server in the same JVM starts clean. */
     static void clear() {
         CONSUMED_AT.clear();
+        PENDING_BREAKS.clear();
     }
 
     private static void consumed(ServerPlayer player) {
@@ -161,28 +166,73 @@ final class BindingInteractions {
     }
 
     /**
-     * {@code PlayerBlockBreakEvents.AFTER}: a player broke a bound block, so its binding goes. A gamemaster who broke it
-     * is told. Other changes to the block (an explosion, a piston, {@code /setblock}) leave the binding in place, inactive
+     * {@code PlayerBlockBreakEvents.BEFORE}: a player is about to break a bound block. Its binding, and for a door, tall
+     * plant or bed the binding saved on the other half, is noted, and goes once the block is gone (see
+     * {@link #settleBreaks}). A double chest's other chest stays, and keeps its binding. Never cancels the break.
+     *
+     * <p>Other changes to the block (an explosion, a piston, {@code /setblock}) leave the binding in place, inactive
      * until the same block is back, and breaking another block that stands there meanwhile leaves it too.
      */
+    static boolean beforeBreak(Level level, Player player, BlockPos pos, BlockState state,
+            @Nullable BlockEntity blockEntity) {
+        if (level instanceof ServerLevel serverLevel) {
+            noteBreak(serverLevel, player, pos, state);
+            if (BlockParts.breaksTogether(state)) {
+                BlockParts.otherHalf(pos, state).ifPresent(other -> noteBreak(serverLevel, player, other, state));
+            }
+        }
+        return true;
+    }
+
+    /** {@code PlayerBlockBreakEvents.AFTER}: the break went through, so its noted bindings are settled at once. */
     static void afterBreak(Level level, Player player, BlockPos pos, BlockState state,
             @Nullable BlockEntity blockEntity) {
-        if (!(level instanceof ServerLevel serverLevel)) {
+        settleBreaks();
+    }
+
+    /**
+     * Removes each noted binding whose block is gone, and forgets the notes; a binding whose block still stands, because
+     * the break was cancelled, stays. Runs after each break and at the end of every tick: a creative player breaking a
+     * door's upper half has the lower half removed first, which takes the upper half with it, so vanilla finds nothing
+     * left to break and no {@code AFTER} event fires.
+     */
+    static void settleBreaks() {
+        if (PENDING_BREAKS.isEmpty()) {
             return;
         }
-        BlockBindings bindings = BlockBindings.of(serverLevel);
-        if (bindings.get(pos).filter(binding -> binding.matches(state)).isEmpty()) {
+        List<PendingBreak> pending = List.copyOf(PENDING_BREAKS);
+        PENDING_BREAKS.clear();
+        for (PendingBreak broken : pending) {
+            if (!broken.level().getBlockState(broken.pos()).is(broken.state().getBlock())) {
+                removeBroken(broken.level(), BlockBindings.of(broken.level()), broken.player(), broken.pos(),
+                        broken.state());
+            }
+        }
+    }
+
+    private static void noteBreak(ServerLevel level, Player player, BlockPos pos, BlockState state) {
+        if (BlockBindings.of(level).get(pos).filter(binding -> binding.matches(state)).isPresent()) {
+            PENDING_BREAKS.add(new PendingBreak(level, pos.immutable(), state, player));
+        }
+    }
+
+    /** A bound block a player is breaking, noted before the break and settled after it. */
+    private record PendingBreak(ServerLevel level, BlockPos pos, BlockState state, Player player) {}
+
+    private static void removeBroken(ServerLevel level, BlockBindings bindings, Player player, BlockPos pos,
+            BlockState broken) {
+        if (bindings.get(pos).filter(binding -> binding.matches(broken)).isEmpty()) {
             return;
         }
-        Optional<BlockBinding> removed = bindings.remove(pos);
+        BlockBinding removed = bindings.remove(pos).orElseThrow();
         String where = String.format(Locale.ROOT, "%d %d %d in %s", pos.getX(), pos.getY(), pos.getZ(),
-                serverLevel.dimension().identifier());
-        Haruhi.LOGGER.info("Removed the Haruhi binding of {} at {}: {} broke the block", removed.get().graph(), where,
+                level.dimension().identifier());
+        Haruhi.LOGGER.info("Removed the Haruhi binding of {} at {}: {} broke the block", removed.graph(), where,
                 player.getName().getString());
         if (player instanceof ServerPlayer serverPlayer
                 && Commands.hasPermission(Commands.LEVEL_GAMEMASTERS).test(serverPlayer.createCommandSourceStack())) {
             serverPlayer.sendSystemMessage(Component.literal(
-                    "Removed the Haruhi binding of " + removed.get().graph() + " at " + where));
+                    "Removed the Haruhi binding of " + removed.graph() + " at " + where));
         }
     }
 
