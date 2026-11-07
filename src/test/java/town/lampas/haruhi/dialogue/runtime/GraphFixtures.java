@@ -1,6 +1,7 @@
 package town.lampas.haruhi.dialogue.runtime;
 
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,14 +82,34 @@ final class GraphFixtures {
             DialogueAction... onEnter) {
         DialogueNode source = new DialogueNode(id, Optional.empty(), Optional.of(Component.literal(text)),
                 Optional.empty(), Optional.empty(), List.of(), List.of(), Optional.ofNullable(next), List.of());
-        return new CompiledGraph.Node(source, List.of(onEnter), choices);
+        return new CompiledGraph.Node(source, List.of(onEnter), List.of(), choices);
     }
 
-    /** A router: no text, one weighted pick over its branches. */
+    /** A router: no text, one weighted pick over its branches, none of them gated. */
     static CompiledGraph.Node router(String id, WeightedNext... branches) {
+        List<CompiledGraph.Branch> compiled = new ArrayList<>();
+        for (WeightedNext branch : branches) {
+            compiled.add(new CompiledGraph.Branch(branch, List.of()));
+        }
+        return router(id, null, compiled, List.of());
+    }
+
+    /**
+     * A router with gated branches and a fallback {@code next} (null for none), running {@code onEnter} before it
+     * picks.
+     */
+    static CompiledGraph.Node router(String id, String next, List<CompiledGraph.Branch> branches,
+            List<DialogueAction> onEnter) {
+        List<WeightedNext> sources = branches.stream().map(CompiledGraph.Branch::source).toList();
         DialogueNode source = new DialogueNode(id, Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.empty(), List.of(), List.of(), Optional.empty(), List.of(branches));
-        return new CompiledGraph.Node(source, List.of(), List.of());
+                Optional.empty(), List.of(), List.of(), Optional.ofNullable(next), sources);
+        return new CompiledGraph.Node(source, onEnter, branches, List.of());
+    }
+
+    /** A router branch to {@code node} that can be picked only when every gate holds. */
+    static CompiledGraph.Branch branch(String node, int weight, DialogueCondition... gates) {
+        // The source's onlyIf only describes the bundle; the runner tests the compiled gates.
+        return new CompiledGraph.Branch(new WeightedNext(node, weight), List.of(gates));
     }
 
     /** A static choice that is hidden when its gate fails. */

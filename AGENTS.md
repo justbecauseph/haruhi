@@ -151,6 +151,10 @@ Field rules (the content component enforces them, and other components rely on t
   - No `model` means the built-in default humanoid model, with `texture` used as a 64×64 player-layout skin.
 - **Node fields:**
   - A node with `random` is a router. It has no `text` and no `choices`, and every weight is > 0.
+  - A router branch may have `only_if` (default empty). After the router's `on_enter`, it picks by weight among the
+    branches whose conditions all hold; when none hold, it moves to the router's `next`, or ends the conversation.
+    Branches are not tried in order: if/else-if is a chain of routers through `next`. The conditions read flags written
+    earlier in the same step.
   - Any other node requires `text`.
   - `choices`, `next` and `random` all name nodes in the same graph.
   - `on_enter` defaults to empty.
@@ -160,7 +164,8 @@ Field rules (the content component enforces them, and other components rely on t
   - `only_if` and `actions` default to empty.
 - **Graph and bundle rules:**
   - `start` must exist, and every node must be reachable from it. Edges are `next`, choice `next`, `random` and
-    `haruhi:goto` targets.
+    `haruhi:goto` targets. A router's `next` is an edge only when every one of its branches has a non-empty
+    `only_if`; with an ungated branch the router always picks a branch.
   - One exception: in a graph where a node reachable from `start` holds a provider choice, nodes that no edge reaches
     are allowed, because a provider names its next node at run time. A provider in an unreachable node does not
     count.

@@ -101,12 +101,12 @@
       "properties": {
         "text": { "$ref": "#/$defs/text", "description": "What the speaker says. Required on every node except a router." },
         "choices": { "type": "array", "items": { "$ref": "#/$defs/choice" }, "description": "Choices, shown in order." },
-        "next": { "type": "string", "description": "Node to move to on continue. On a menu it is used only when every choice is hidden. A router never follows it." },
+        "next": { "type": "string", "description": "Node to move to on continue. On a menu it is used only when every choice is hidden. On a router it is used only when no branch can be picked because their only_if conditions fail; without it the conversation then ends." },
         "random": {
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/branch" },
-          "description": "Makes the node a router: it shows nothing and enters one branch, picked by weight."
+          "description": "Makes the node a router: it shows nothing and enters one branch, picked by weight among the branches whose only_if conditions all hold. When none hold, it moves to next, or ends the conversation."
         },
         "on_enter": { "type": "array", "items": { "$ref": "#/$defs/action" }, "description": "Actions run, in order, every time the node is entered." },
         "speaker": { "$ref": "#/$defs/id", "description": "NPC profile id whose name and portrait the box shows. Default: the NPC being talked to." },
@@ -123,7 +123,8 @@
       "type": "object",
       "properties": {
         "node": { "type": "string", "description": "A node of the same graph." },
-        "weight": { "type": "integer", "minimum": 1, "maximum": 2147483647, "description": "Chance is this weight over the total of the router's weights." }
+        "weight": { "type": "integer", "minimum": 1, "maximum": 2147483647, "description": "Chance is this weight over the total weight of the branches that can be picked." },
+        "only_if": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "description": "Conditions that must all be true for the branch to be picked. Tested after the router's on_enter. Default: none, so the branch can always be picked." }
       },
       "required": ["node", "weight"],
       "additionalProperties": false

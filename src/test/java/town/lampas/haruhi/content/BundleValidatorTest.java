@@ -473,6 +473,113 @@ class BundleValidatorTest {
         assertEquals(List.of(GRAPH + "#pick, random entry 1: unknown key 'chance'"), problems(validate(bundle)));
     }
 
+    // AGENTS.md: a router branch may have only_if; the router's next is where it goes when no branch's conditions hold.
+
+    /** Leads the base graph's choice to a router "pick" with one branch to bye, and a fallback node "other". */
+    private static JsonObject withRouter(String branch) {
+        JsonObject bundle = baseBundle();
+        node(bundle, "hello").getAsJsonArray("choices").get(0).getAsJsonObject().addProperty("next", "pick");
+        addNode(bundle, "pick", "{\"random\":[" + branch + "],\"next\":\"other\"}");
+        addNode(bundle, "other", "{\"text\":\"Who are you?\"}");
+        return bundle;
+    }
+
+    private static final String SEEN_CHECK =
+            "{\"type\":\"haruhi_test:flag_check\",\"namespace\":\"haruhi_test:gate\",\"flag\":\"seen\"}";
+
+    @Test
+    void aRouterBranchKeepsItsOnlyIfConditionsInOrder() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[" + SEEN_CHECK
+                + ",{\"type\":\"haruhi_test:always\"}]}");
+        var branch = bundleOf(validate(bundle)).dialogues().get(id(GRAPH)).nodes().get("pick").random().get(0);
+        assertEquals("bye", branch.node());
+        assertEquals(List.of(id("haruhi_test:flag_check"), id("haruhi_test:always")),
+                branch.onlyIf().stream().map(condition -> condition.type()).toList());
+        assertEquals("seen", branch.onlyIf().get(0).args().get("flag").getAsString(),
+                "the condition keeps its arguments, without type");
+    }
+
+    @Test
+    void aBranchWithoutOnlyIfHasNoConditions() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[" + SEEN_CHECK + "]}");
+        node(bundle, "pick").getAsJsonArray("random")
+                .add(JsonParser.parseString("{\"node\":\"other\",\"weight\":2}"));
+        var random = bundleOf(validate(bundle)).dialogues().get(id(GRAPH)).nodes().get("pick").random();
+        assertEquals(List.of(), random.get(1).onlyIf());
+    }
+
+    @Test
+    void aMisspeltOnlyIfInARouterBranchIsRefused() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"onlyIf\":[" + SEEN_CHECK + "]}");
+        assertEquals(List.of(GRAPH + "#pick, random entry 1: unknown key 'onlyIf'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void onlyIfInARouterBranchMustBeAnArrayOfConditions() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[\"seen\"]}");
+        List<String> lines = problems(validate(bundle));
+        assertEquals(1, lines.size(), lines::toString);
+        assertTrue(lines.get(0).startsWith(GRAPH + "#pick, random entry 1: only_if entry 1 "), lines::toString);
+    }
+
+    @Test
+    void aRouterBranchConditionMustBeRegistered() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[{\"type\":\"haruhi_test:nope\"}]}");
+        assertEquals(List.of(GRAPH + "#pick, random entry 1: condition haruhi_test:nope is not registered"),
+                problems(validate(bundle)));
+    }
+
+    @Test
+    void aRouterBranchConditionMustUseADeclaredFlag() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":["
+                + "{\"type\":\"haruhi_test:flag_check\",\"namespace\":\"haruhi_test:gate\",\"flag\":\"mett\"}]}");
+        assertEquals(List.of(GRAPH + "#pick: flag haruhi_test:gate/mett is not declared"), problems(validate(bundle)));
+    }
+
+    @Test
+    void aNodeReachedOnlyThroughTheNextOfARouterWithConditionsIsReachable() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[" + SEEN_CHECK + "]}");
+        assertEquals(List.of(), problems(validate(bundle)));
+    }
+
+    @Test
+    void theNextOfARouterWithoutConditionsDoesNotCountForReachability() {
+        // Every branch can always be picked, so the router never moves to its next.
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1}");
+        assertEquals(List.of(GRAPH + "#other: node is not reachable from start 'hello'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void theNextOfARouterWithAnUngatedBranchDoesNotCountForReachability() {
+        // The ungated branch can always be picked, so the router never falls through to its next.
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[" + SEEN_CHECK + "]},"
+                + "{\"node\":\"bye\",\"weight\":1}");
+        assertEquals(List.of(GRAPH + "#other: node is not reachable from start 'hello'"), problems(validate(bundle)));
+    }
+
+    @Test
+    void theNextOfARouterWhoseBranchesAreAllGatedIsReachable() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[" + SEEN_CHECK + "]},"
+                + "{\"node\":\"bye\",\"weight\":2,\"only_if\":[{\"type\":\"haruhi_test:always\"}]}");
+        assertEquals(List.of(), problems(validate(bundle)));
+    }
+
+    @Test
+    void aRoutersOnEnterProblemsComeBeforeItsBranchProblems() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[{\"type\":\"haruhi_test:nope\"}]}");
+        node(bundle, "pick").add("on_enter", ContentTestSupport.array("[{\"type\":\"haruhi_test:nope\"}]"));
+        assertEquals(List.of(
+                        GRAPH + "#pick: action haruhi_test:nope is not registered",
+                        GRAPH + "#pick, random entry 1: condition haruhi_test:nope is not registered"),
+                problems(validate(bundle)));
+    }
+
+    @Test
+    void anEmptyOnlyIfDoesNotMakeTheRoutersNextReachable() {
+        JsonObject bundle = withRouter("{\"node\":\"bye\",\"weight\":1,\"only_if\":[]}");
+        assertEquals(List.of(GRAPH + "#other: node is not reachable from start 'hello'"), problems(validate(bundle)));
+    }
+
     // AGENTS.md: flag namespaces and names contain no NUL character.
 
     @Test

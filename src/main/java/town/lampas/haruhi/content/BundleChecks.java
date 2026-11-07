@@ -47,10 +47,10 @@ final class BundleChecks {
     }
 
     /**
-     * Every node reachable from the graph's start, following next, choice next, random branches and goto actions. A
-     * provider names its next node only when its own node opens, so a graph is exempt when a reachable node holds a
-     * provider choice: its unreachable nodes may be reached through that provider. A provider in an unreachable node
-     * does not exempt the graph.
+     * Every node reachable from the graph's start, following next (a router's only when every branch has conditions),
+     * choice next, random branches and goto actions. A provider names its next node only when its own node opens, so a
+     * graph is exempt when a reachable node holds a provider choice: its unreachable nodes may be reached through that
+     * provider. A provider in an unreachable node does not exempt the graph.
      */
     static void checkReachability(ContentBundle bundle, Set<Identifier> completeGraphs, Problems problems) {
         for (DialogueGraph graph : sortedGraphs(bundle)) {
@@ -145,9 +145,14 @@ final class BundleChecks {
         return seen;
     }
 
+    /**
+     * The nodes a node can move to. A router moves to its {@code next} only when none of its branches can be picked.
+     * A branch without {@code only_if} can always be picked, so a router's {@code next} counts only when every branch
+     * has conditions.
+     */
     private static List<String> successors(DialogueNode node) {
         List<String> targets = new ArrayList<>();
-        if (!node.isRouter()) {
+        if (!node.isRouter() || node.random().stream().allMatch(branch -> !branch.onlyIf().isEmpty())) {
             node.next().ifPresent(targets::add);
         }
         node.random().forEach(branch -> targets.add(branch.node()));

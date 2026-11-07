@@ -9,6 +9,9 @@
     ],
     "haruhi:fixture/reward": [
       "got_reward"
+    ],
+    "haruhi:fixture/greeter": [
+      "met"
     ]
   },
   "npcs": {},
@@ -60,6 +63,56 @@
         },
         "bye": {
           "text": "Safe travels."
+        }
+      }
+    },
+    "haruhi:fixture/greeter": {
+      "start": "greet",
+      "nodes": {
+        "greet": {
+          "random": [
+            {
+              "node": "welcome_back",
+              "weight": 1,
+              "only_if": [
+                {
+                  "type": "haruhi:flag",
+                  "namespace": "haruhi:fixture/greeter",
+                  "flag": "met",
+                  "op": "set"
+                }
+              ]
+            }
+          ],
+          "next": "first_meeting"
+        },
+        "first_meeting": {
+          "text": "I don't think we've met.",
+          "choices": [
+            {
+              "text": "Nice to meet you.",
+              "next": "greet",
+              "actions": [
+                {
+                  "type": "haruhi:flag/set",
+                  "namespace": "haruhi:fixture/greeter",
+                  "flag": "met",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "text": "Leave.",
+              "next": "bye"
+            }
+          ]
+        },
+        "welcome_back": {
+          "text": "Good to see you again.",
+          "next": "bye"
+        },
+        "bye": {
+          "text": "See you."
         }
       }
     },

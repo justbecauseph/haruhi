@@ -7,9 +7,10 @@ GeckoLib. Each player's dialogue flags and visit counts are stored in memory or 
 
 ## Features
 
-- Dialogue graphs are JSON: nodes with text and choices, weighted random routers, conditions that hide or gray out
-  choices, and actions that run on entering a node or picking a choice. A bundle is validated in full before it can
-  become active, and the validator lists every problem it finds, one per line.
+- Dialogue graphs are JSON: nodes with text and choices, routers that branch by weight or on a condition (one line
+  for a newcomer, another for a returning player), conditions that hide or gray out choices, and actions that run on
+  entering a node or picking a choice. A bundle is validated in full before it can become active, and the validator
+  lists every problem it finds, one per line.
 - `/haruhi content` imports, validates, activates and rolls back bundles while the server runs. Each revision is
   stored with the SHA-256 digest of its canonical JSON.
 - The visual-novel screen types out the text, shows a portrait or a 3D headshot of the speaker, and takes choices by

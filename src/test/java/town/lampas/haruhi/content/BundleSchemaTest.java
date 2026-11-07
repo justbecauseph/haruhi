@@ -112,6 +112,15 @@ class BundleSchemaTest {
         return Stream.of(
                 valid("the base bundle", bundle -> {}),
                 valid("a router as the start node", BundleSchemaTest::routerStart),
+                valid("a router branch with only_if and the router's next as the fallback", bundle -> {
+                    routerStart(bundle);
+                    branch(bundle).add("only_if", element("[{\"type\": \"haruhi_test:always\"}]"));
+                    node(bundle, "route").addProperty("next", "bye");
+                }),
+                valid("a router branch with an empty only_if", bundle -> {
+                    routerStart(bundle);
+                    branch(bundle).add("only_if", new JsonArray());
+                }),
                 valid("text as an array of components", bundle ->
                         node(bundle, "bye").add("text", element("[\"\", {\"text\": \"Go on.\", \"color\": \"gold\"}]"))),
                 valid("a grayed-out choice with a message", bundle -> {
@@ -180,6 +189,18 @@ class BundleSchemaTest {
                 invalid("an unknown branch key", bundle -> {
                     routerStart(bundle);
                     branch(bundle).addProperty("chance", 1);
+                }),
+                invalid("a misspelt only_if in a branch", bundle -> {
+                    routerStart(bundle);
+                    branch(bundle).add("onlyIf", element("[{\"type\": \"haruhi_test:always\"}]"));
+                }),
+                invalid("a branch only_if as an object", bundle -> {
+                    routerStart(bundle);
+                    branch(bundle).add("only_if", element("{\"type\": \"haruhi_test:always\"}"));
+                }),
+                invalid("a branch condition without type", bundle -> {
+                    routerStart(bundle);
+                    branch(bundle).add("only_if", element("[{\"flag\": \"seen\"}]"));
                 }),
                 invalid("a choice with neither text nor provider", bundle -> choice(bundle).remove("text")),
                 invalid("an unknown choice key", bundle -> choice(bundle).add("onlyIf", new JsonArray())),

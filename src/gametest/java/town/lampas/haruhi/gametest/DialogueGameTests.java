@@ -104,6 +104,9 @@ public final class DialogueGameTests {
     private static final Identifier WORLD = Identifier.fromNamespaceAndPath("haruhi", "fixture/world");
     private static final Identifier CHAIN_FIRST = Identifier.fromNamespaceAndPath("haruhi", "fixture/chain0");
     private static final Identifier PROBE = Identifier.fromNamespaceAndPath("haruhi", "fixture/probe");
+    private static final Identifier GREETER = Identifier.fromNamespaceAndPath("haruhi", "fixture/greeter");
+    private static final FlagKey GREETER_MET = new FlagKey("haruhi:fixture/greeter", "met");
+    private static final String NICE_TO_MEET_YOU = "Nice to meet you.";
     /** Where the built-ins that a test parses by hand are parsed: no bundle, so they may not use flags. */
     private static final ParseContext PROBE_PARSE = new ParseContext(ContentBundle.EMPTY, PROBE, "probe");
     private static final String FIXTURE = "/haruhi/fixtures/dialogue/bundle.json";
@@ -192,6 +195,48 @@ public final class DialogueGameTests {
                     helper.assertTrue(second.id() != firstSession[0], "a new conversation has a new session id");
                     helper.assertTrue(visibleIndex(second, REMEMBER) >= 0,
                             "the flag set in the first conversation shows Remember me? in the next");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aRouterWhoseBranchConditionFailsMovesToItsNext(GameTestHelper helper) {
+        Subject subject = new Subject();
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    DialogueSession session = openNow(helper, sessions(), subject.player, GREETER);
+                    helper.assertValueEqual(session.presentedNode(), "first_meeting",
+                            "a player who has not met the greeter goes to the router's next");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aRouterTakesTheBranchWhoseConditionHolds(GameTestHelper helper) {
+        Subject subject = new Subject();
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    flagsOf(helper, subject.player).set(GREETER_MET, 1);
+                    DialogueSession session = openNow(helper, sessions(), subject.player, GREETER);
+                    helper.assertValueEqual(session.presentedNode(), "welcome_back",
+                            "a player who has met the greeter takes the branch gated on met");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aRouterReadsAFlagThatThePickLeadingToItSetInTheSameStep(GameTestHelper helper) {
+        Subject subject = new Subject();
+        joinLoaded(helper, subject)
+                .thenExecute(() -> {
+                    DialogueSession first = openNow(helper, sessions(), subject.player, GREETER);
+                    helper.assertValueEqual(first.presentedNode(), "first_meeting", "the node a new player sees");
+                    // The choice sets met and moves to the router, which tests met before anything is sent.
+                    sessions().choose(subject.player, first.id(), "first_meeting",
+                            indexOf(helper, first, NICE_TO_MEET_YOU));
+                    DialogueSession after = presentedAt(helper, subject.player, "welcome_back");
+                    helper.assertTrue(after.id() == first.id(), "the pick stays in the same conversation");
+                    helper.assertTrue(flagsOf(helper, subject.player).isSet(GREETER_MET), "the pick set met");
                 })
                 .thenSucceed();
     }
