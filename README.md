@@ -2,8 +2,9 @@
 
 Haruhi is a Fabric mod for Minecraft 26.2 that adds scriptable NPCs. You write NPC profiles and their conversations as
 one JSON content bundle, load it on the server as a stored revision, and spawn NPCs that open those conversations when a
-player right-clicks them. Players see a visual-novel dialogue screen, and NPCs draw with Blockbench models through
-GeckoLib. Each player's dialogue flags and visit counts are stored in memory or in PostgreSQL.
+player right-clicks them. Staff can also bind a conversation to a placed block or to an existing entity, such as a
+vanilla villager. Players see a visual-novel dialogue screen, and NPCs draw with Blockbench models through GeckoLib.
+Each player's dialogue flags and visit counts are stored in memory or in PostgreSQL.
 
 ## Features
 
@@ -119,7 +120,7 @@ PostgreSQL before players depend on them: see [Storage configuration](docs/serve
 | Guide | For | Covers |
 |---|---|---|
 | [Server guide](docs/server-guide.md) | server operators | installing, configuration files, storage and PostgreSQL, every `/haruhi` command, block and entity bindings, content revisions, flag persistence, troubleshooting |
-| [Content guide](docs/content-guide.md) | content writers | the bundle format, NPC profiles, dialogue graphs, built-in conditions and actions |
+| [Content guide](docs/content-guide.md) | content writers | the bundle format, NPC profiles, dialogue graphs, routers that branch on conditions, graphs bound to blocks and entities, built-in conditions and actions |
 | [Bundle JSON Schema](docs/bundle.schema.json) | content writers | a JSON Schema of the bundle format and built-in arguments for editors; setup is in the content guide |
 | [Models and animations](docs/models-and-animations.md) | model makers | Blockbench models, the `.bbmodel` converter, textures, animations, portraits |
 | [Developer guide](docs/developer-guide.md) | mod developers | architecture, network payloads, the extension API, building and testing, repository layout |

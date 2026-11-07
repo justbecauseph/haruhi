@@ -389,7 +389,7 @@
       "additionalProperties": false
     },
     "action.open": {
-      "description": "After the current actions, ends this conversation and opens a graph of the same bundle with the same NPC.",
+      "description": "After the current actions, ends this conversation and opens a graph of the same bundle with the same NPC, or the same bound block or entity and its speaker.",
       "properties": {
         "type": true,
         "graph": { "$ref": "#/$defs/id" }

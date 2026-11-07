@@ -66,7 +66,7 @@ Listeners run in registration order, which follows the initialisation order.
 | `SERVER_STARTING` | storage: rebuild the storage if a previous server closed it, run the PostgreSQL migrations (blocking). content: attach to the server. npc: remember the server. |
 | `SERVER_STARTED` | content: the startup load (active revision, else `config/haruhi/bundle.json`, else the seed) |
 | `ServerPlayerEvents.JOIN` | dialogue: start loading the player's flags and visits |
-| `END_SERVER_TICK` | dialogue: end sessions whose player died or whose NPC is gone or more than 8 blocks away, retry failed loads, flush flag batches every 100 ticks; hand over waiting `haruhi:give` rewards |
+| `END_SERVER_TICK` | dialogue: end sessions whose player died, whose interlocutor (an NPC or a bound entity) is gone or more than 8 blocks away, or whose player left the `openAt` anchor; retry failed loads, flush flag batches every 100 ticks; hand over waiting `haruhi:give` rewards |
 | `AFTER_RESPAWN`, `AFTER_DEATH` | dialogue: end the conversation; the new player entity takes over the cached flags |
 | `ServerPlayerEvents.LEAVE` | dialogue: drop the session and the cache, flush the player's pending flags |
 | `SERVER_STOPPING` | dialogue: drop every session, flush every batch and wait up to 10 seconds; log rewards that are still waiting |
@@ -153,7 +153,7 @@ sequenceDiagram
     end
     P->>C: pick a choice or continue
     C->>D: DialogueChoicePayload(session, node, index)
-    D->>D: current session? last node sent? NPC within 8 blocks?
+    D->>D: current session? last node sent? interlocutor within 8 blocks? player within the anchor?
     D->>R: choose(session, index)
     R->>R: work out the visible choices again
     alt index out of range, entry disabled or changed
@@ -170,7 +170,8 @@ What the server checks, and in what order:
 1. A pick counts only when its session id is the player's current session and its node id is the node last sent.
    Anything else is ignored without a reply. The client stops taking input after a pick until the next node arrives,
    for at most 2 seconds.
-2. A conversation with an NPC ends when the NPC is dead, in another level, or more than 8 blocks away. The tick
+2. A conversation with an interlocutor (an NPC or a bound entity) ends when the interlocutor is dead, in another
+   level, or more than 8 blocks away, and one opened with `openAt` ends when the player is outside the anchor. The tick
    handler checks the same every tick.
 3. The runner works out the node's visible entries again, running the conditions and providers. The index must be in
    range of both the list it sent and the new list, the entry must be enabled, and it must be the same choice, the
@@ -215,8 +216,7 @@ Every payload type is registered on both sides by `HaruhiNetworking.registerPayl
 `ChoiceView` is `index` varint, `text` component, `enabled` boolean, `unavailableReason` optional component. Hidden
 choices are left out of the list. Grayed-out choices stay in it with `enabled` false, so the indices after them do not
 move when they become available. `speakerEntityId` is set only when the entity the player talks to (an NPC, or a
-bound entity) is the node's speaker.
-`portrait` is the node's portrait, else the speaker profile's.
+bound entity) is the node's speaker. `portrait` is the node's portrait, else the speaker profile's.
 
 A client without the `haruhi:dialogue_node` channel gets vanilla dialogs instead (`dialogue.presenter.VanillaDialogs`):
 a `MultiActionDialog` for a node with choices, a `NoticeDialog` with a Continue button for one without. Each button
@@ -256,13 +256,13 @@ dependencies {
 }
 ```
 
-Declare `"depends": { "haruhi": ">=0.1.0" }` in your `fabric.mod.json`. To build against a haruhi checkout instead,
-for a change that is not published yet, add `includeBuild('../haruhi')` to your `settings.gradle`: Gradle substitutes
-the dependency with that build. [Alina](https://github.com/justbecauseph/alina) does both, and builds against the
-published jar when no checkout sits beside it.
+Declare `"depends": { "haruhi": ">=0.1.0" }` in your `fabric.mod.json`. To build against a checkout of the Haruhi
+repository instead, for a change that is not published yet, add `includeBuild('../haruhi')` to your
+`settings.gradle`: Gradle substitutes the dependency with that build. [Alina](https://github.com/justbecauseph/alina)
+does both, and builds against the published jar when no checkout sits beside it.
 
 The jar also holds the bundle schema as `haruhi/bundle.schema.json`, so a mod that publishes a schema for its own
-bundle extension can check it against the haruhi version it depends on.
+bundle extension can check it against the Haruhi version it depends on.
 
 The API is in `town.lampas.haruhi.dialogue.api`. It also uses `ContentBundle` and `FlagNamespace` from
 `town.lampas.haruhi.content.model` and `FlagKey` from `town.lampas.haruhi.storage`.
@@ -273,7 +273,7 @@ The API is in `town.lampas.haruhi.dialogue.api`. It also uses `ContentBundle` an
 
 | Method | Parser type | Parsed value | Runs |
 |---|---|---|---|
-| `registerCondition(id, ConditionType)` | `DataResult<DialogueCondition> parse(JsonObject args, ParseContext context)` | `boolean test(DialogueContext)` | each time the node's choices are worked out; must have no side effects |
+| `registerCondition(id, ConditionType)` | `DataResult<DialogueCondition> parse(JsonObject args, ParseContext context)` | `boolean test(DialogueContext)` | each time the node's choices are worked out, and each time a router tests its branches' `only_if`; must have no side effects |
 | `registerAction(id, ActionType)` | `DataResult<DialogueAction> parse(JsonObject args, ParseContext context)` | `void run(DialogueContext)` | when a node is entered (`on_enter`) or a choice is picked (`actions`) |
 | `registerProvider(id, ChoiceProviderType)` | `DataResult<ChoiceProvider> parse(JsonObject args, ParseContext context)` | `List<ProvidedChoice> provide(DialogueContext)` | each time the node is shown, and again when a pick arrives |
 
@@ -283,7 +283,8 @@ The API is in `town.lampas.haruhi.dialogue.api`. It also uses `ContentBundle` an
 - `args` is the spec object with its `type` key removed. Reject argument names you do not take: the built-ins do, so
   a misspelt argument fails validation instead of being ignored.
 - Return `DataResult.error(...)` for a bad argument. Validation prefixes the message with where the spec sits,
-  `<graph>#<node>` or `<graph>#<node>, choice <n>`, unless it already starts with `context.where()`. A parser that
+  `<graph>#<node>`, `<graph>#<node>, choice <n>` or `<graph>#<node>, random entry <n>`, unless it already starts with
+  `context.where()`. A parser that
   throws during validation is recorded as `parsing failed with <exception>`. When a graph is compiled for a
   conversation, only an `IllegalStateException` is caught, so return errors rather than throwing.
 - A parser runs at every validation (`/haruhi content validate`, `import`, `activate`, and the startup load) and again
@@ -411,7 +412,7 @@ and only on the server thread.
 | `visits()` | how many times this character has opened this graph with this NPC profile (the interlocutor NPC's, else the `DialogueSpeaker` profile, else `haruhi:none`), counting the current conversation |
 | `goTo(nodeId)` | after the current actions, enter this node instead of the choice's `next` |
 | `end()` | after the current actions, close the conversation |
-| `openGraph(graphId)` | after the current actions, close this conversation and open another graph with the same interlocutor |
+| `openGraph(graphId)` | after the current actions, close this conversation and open another graph with the same interlocutor, anchor and `DialogueSpeaker` |
 
 Flag values are integers. `isSet` is true for any value other than 0, and an unset flag reads 0. `add` uses
 `Math.addExact`, so an overflow throws and ends the conversation. Writes change the cache at once and reach storage in
@@ -555,9 +556,8 @@ Minecraft server. `test` depends on `classes` and passes the compiled main class
   conditions and actions and gives the same verdict as their parsers on a set of argument cases.
 - `npc/`: commands, facing and look syncing.
 - `binding/`: the saved form of block bindings and its tolerant load, which block states a binding applies to, the
-  other half of doors, tall plants, beds and double chests, the
-  problems `/haruhi bindings` marks, and the command tree's permission gate. The speaker rules of a bound conversation
-  are in `dialogue/presenter/SpeakerTest`.
+  other half of doors, tall plants, beds and double chests, the problems `/haruhi bindings` marks, and the command
+  tree's permission gate. The speaker rules of a bound conversation are in `dialogue/presenter/SpeakerTest`.
 - `client/`: the screen's layout, keys, HUD decisions and typewriter, the client config, headshot framing, and the
   GeckoLib renderer.
 - `tools/bbmodel/`: the converter, including `GeckoLibBakeTest`, which has GeckoLib 5.5.5 bake converted output.

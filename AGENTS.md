@@ -227,8 +227,8 @@ Haruhi registers no providers itself. The API exists for consumers such as the G
 ## Bindings
 
 The binding component attaches a graph to a placed block or to an entity that is neither a player nor a `haruhi:npc`.
-The server guide's "/haruhi bind, unbind and bindings" and "Binding behaviour" sections are the user-facing reference;
-keep them in step.
+The "/haruhi bind, unbind and bindings" and "Binding behaviour" sections of `docs/server-guide.md`, and "Bindings:
+blocks and entities" in `docs/content-guide.md`, are the user-facing reference; keep them in step.
 
 - Commands, all for gamemasters: `/haruhi bind block <pos> <graph> [<speaker>]`, `/haruhi bind entity <targets> <graph>
   [<speaker>]`, `/haruhi unbind block <pos>`, `/haruhi unbind entity <targets>`, `/haruhi bindings [all]`. `<graph>`
@@ -238,12 +238,13 @@ keep them in step.
   interaction is still skipped. A `UseItemCallback` refuses the held item's use in the tick of a consumed use and the
   next, because a client that predicted a passing block or entity use sends one.
 - A block opens with `openAt` on an anchor at the block's centre, 8 blocks (a longer block reach plus 3, up to 64); an
-  entity with `open`, the entity as the interlocutor. Both pass `DialogueSpeaker.of(speaker, <block or entity name>)`, so visits count under the speaker
-  profile, else `haruhi:none`.
+  entity with `open`, the entity as the interlocutor. Both pass `DialogueSpeaker.of(speaker, <block or entity name>)`,
+  so visits count under the speaker profile, else `haruhi:none`.
 - A block binding stores the block id at bind time and applies only while that block is there. A door, tall plant,
-  bed or double chest has one binding for both halves (`BlockParts`). A player breaking that block removes the binding; any other change leaves it inactive until the block is back. `BlockBindings` loads in
-  `ServerLevelEvents.LOAD`, so no use reads the file. An entity binding is the persistent
-  attachment `haruhi:binding`, not copied on mob conversion and not synced.
+  bed or double chest has one binding for both halves (`BlockParts`). A player breaking that block removes the
+  binding; any other change leaves it inactive until the block is back. `BlockBindings` loads in
+  `ServerLevelEvents.LOAD`, so no use reads the file. An entity binding is the persistent attachment `haruhi:binding`,
+  not copied on mob conversion and not synced.
 
 ## Blockbench model converter
 

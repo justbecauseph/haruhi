@@ -47,6 +47,8 @@ Other commands that help while writing:
 | `/haruhi npc list` | Lists every loaded NPC with its profile, dimension and position. |
 | `/haruhi dialogue open <graph> [targets]` | Opens a graph for players without an NPC, which is a quick way to test one graph. |
 | `/haruhi dialogue close [targets]` | Ends the players' conversations. |
+| `/haruhi bind block <pos> <graph> [<speaker>]`, `/haruhi bind entity <targets> <graph> [<speaker>]` | Binds a graph to a block or an entity, so using it opens the graph. See [Bindings](#bindings-blocks-and-entities). |
+| `/haruhi bindings [all]` | Lists bindings nearby, or all of them, and marks those whose graph or speaker profile the live content lacks. |
 | `/haruhi flags get <player> <namespace> <flag>` | Shows a player's flag value. |
 | `/haruhi flags set <player> <namespace> <flag> [value]` | Sets a flag; `value` defaults to 1. |
 | `/haruhi flags clear <player> <namespace> <flag>` | Clears a flag. |
@@ -310,11 +312,10 @@ Each type refuses arguments it does not take.
 
 ## How a conversation runs
 
-A conversation opens when a player right-clicks an NPC that has a `dialogue`, uses a block or entity bound to a graph,
-when a command opens a graph, or when a `haruhi:open` action opens another graph. Opening a conversation ends the
-player's current one. If the player's flags
-have not loaded yet (just after joining), the open waits for them. Each open records a visit (see
-[Flags and visits](#flags-and-visits)), then enters the `start` node.
+A conversation opens when a player right-clicks an NPC that has a `dialogue` or uses a block or entity bound to a
+graph, when a command opens a graph, or when a `haruhi:open` action opens another graph. Opening a conversation ends
+the player's current one. If the player's flags have not loaded yet (just after joining), the open waits for them.
+Each open records a visit (see [Flags and visits](#flags-and-visits)), then enters the `start` node.
 
 ```mermaid
 flowchart TD
@@ -322,7 +323,7 @@ flowchart TD
     onEnter --> moved{"Did an action call goto, end or open?"}
     moved -- "goto" --> enter
     moved -- "end" --> ended["Conversation ends"]
-    moved -- "open" --> opened["Conversation ends; the other graph opens with the same NPC"]
+    moved -- "open" --> opened["Conversation ends; the other graph opens with the same NPC, block or entity"]
     moved -- "no" --> router{"Router?"}
     router -- "yes" --> canPick{"Can any branch be picked? (its only_if holds)"}
     canPick -- "yes" --> pick["Pick one of those branches by weight"] --> enter
@@ -346,7 +347,8 @@ flowchart TD
 Entering a node runs its `on_enter` actions in order. `haruhi:goto`, `haruhi:end` and `haruhi:open` take effect after
 all of that node's actions have run, and when several are called the last one wins. A node left this way is never
 shown. Choices are worked out after `on_enter`, so a flag set in `on_enter` already counts for the node's own choices.
-A router tests its branches' `only_if` after `on_enter` in the same way, then enters one branch, or its `next`.
+A router tests its branches' `only_if` after `on_enter` in the same way, then enters one branch, or its `next` (see
+[Branching without the player](#branching-without-the-player)).
 
 Showing a node sends the text, the speaker and the visible choices to the player. Hidden choices are left out;
 grayed-out choices are listed but cannot be picked.
@@ -370,9 +372,6 @@ A conversation also ends when:
 - more than 64 nodes are entered in one step, which catches loops of routers and jumps;
 - `haruhi:open` is chained more than 8 times in one step;
 - a game master runs `/haruhi dialogue close`.
-
-To branch without the player on a flag or a world condition, give router branches `only_if` (see
-[Branching without the player](#branching-without-the-player)).
 
 ## Bindings: blocks and entities
 
@@ -429,7 +428,7 @@ or bound without a speaker profile, counts under the profile id `haruhi:none`. R
 | `haruhi:any_of` | `conditions`: non-empty array of conditions | at least one is true | `{"type": "haruhi:any_of", "conditions": [{"type": "haruhi:weather", "weather": "rain"}, {"type": "haruhi:weather", "weather": "thunder"}]}` |
 | `haruhi:not` | `condition`: one condition | that condition is false | `{"type": "haruhi:not", "condition": {"type": "haruhi:tag", "tag": "banned"}}` |
 | `haruhi:flag` | `namespace`, `flag`: a declared flag. `op`: `set`, `unset`, `eq`, `ne`, `gt`, `gte`, `lt` or `lte`. `value`: whole number, required by the comparisons and refused by `set` and `unset` | `set`: the value is not 0. `unset`: it is 0. Otherwise the value (0 when unset) compared with `value` | `{"type": "haruhi:flag", "namespace": "shop:mira", "flag": "times_talked", "op": "gte", "value": 5}` |
-| `haruhi:visits` | `op`: `eq`, `ne`, `gt`, `gte`, `lt` or `lte`. `value`: whole number | the visit count of this graph with this NPC profile, compared with `value` | `{"type": "haruhi:visits", "op": "eq", "value": 1}` |
+| `haruhi:visits` | `op`: `eq`, `ne`, `gt`, `gte`, `lt` or `lte`. `value`: whole number | the visit count of this graph with this NPC profile (for a bound block or entity, the binding's speaker profile; see [Flags and visits](#flags-and-visits)), compared with `value` | `{"type": "haruhi:visits", "op": "eq", "value": 1}` |
 | `haruhi:predicate` | `predicate`: id of a predicate from the server's data packs | the predicate passes, tested with the player as the entity and the player's position as the origin. A predicate the server does not have is false and logs a warning | `{"type": "haruhi:predicate", "predicate": "shop:in_market_square"}` |
 | `haruhi:has_item` | `item`: item id, or `#` and an item tag id. `count`: at least 1, default 1 | the player's inventory, armor and off-hand slots included, holds at least `count` matching items in total. Nothing is taken | `{"type": "haruhi:has_item", "item": "minecraft:emerald", "count": 5}` |
 | `haruhi:advancement` | `advancement`: id. `criterion`: optional criterion name | the player has completed the advancement, or that criterion of it. An unknown advancement is false | `{"type": "haruhi:advancement", "advancement": "minecraft:story/mine_diamond"}` |
@@ -450,7 +449,7 @@ not check that predicates, items, item tags or advancements exist; a wrong id ma
 | `haruhi:flag/clear` | `namespace`, `flag` | clears the flag, so it reads 0 and unset | `{"type": "haruhi:flag/clear", "namespace": "shop:mira", "flag": "met"}` |
 | `haruhi:goto` | `node`: a node of the same graph | after the current actions, enters `node`: instead of the choice's `next`, or, in `on_enter`, instead of showing this node | `{"type": "haruhi:goto", "node": "menu"}` |
 | `haruhi:end` | none | after the current actions, ends the conversation | `{"type": "haruhi:end"}` |
-| `haruhi:open` | `graph`: a graph of the same bundle | after the current actions, ends this conversation and opens `graph` with the same NPC | `{"type": "haruhi:open", "graph": "shop:mira_quest"}` |
+| `haruhi:open` | `graph`: a graph of the same bundle | after the current actions, ends this conversation and opens `graph` with the same NPC, or the same bound block or entity and its speaker | `{"type": "haruhi:open", "graph": "shop:mira_quest"}` |
 | `haruhi:animation` | `animation`: an animation name | the NPC being talked to plays the animation, for every player whose client tracks it and has Haruhi and GeckoLib. Does nothing in a conversation without an NPC | `{"type": "haruhi:animation", "animation": "wave"}` |
 | `haruhi:sound` | `sound`: sound event id; `volume`: not negative, default 1; `pitch`: above 0, default 1 | plays the sound at the player's position, in the master category. Players nearby hear it too. The id is not checked | `{"type": "haruhi:sound", "sound": "minecraft:entity.item.pickup"}` |
 | `haruhi:message` | `text`: text component | sends the text to the player's chat | `{"type": "haruhi:message", "text": {"text": "Mira hums to herself.", "italic": true}}` |
@@ -715,8 +714,8 @@ How it plays:
 
 - `greet` adds 1 to `times_talked` on every visit. A player who has not met Mira yet goes to its `next`,
   `greet_new`. Once `met` is set, `greet` goes to `greet_again`, which routes to `greet_warm` (weight 3) or
-  `greet_busy` (weight 1). `greet_warm` plays the humanoid's `wave` clip on Mira, which the talking player sees when their client has
-  GeckoLib.
+  `greet_busy` (weight 1). `greet_warm` plays the humanoid's `wave` clip on Mira, which the talking player sees when
+  their client has GeckoLib.
 - On a first visit `menu` shows "I'm new in town.", "Got anything to read?", the grayed-out back room choice by day,
   and "Just browsing.". Picking "I'm new in town." sets `met`; back at `menu` that choice is hidden and "Heard any
   rumours?" shows instead.

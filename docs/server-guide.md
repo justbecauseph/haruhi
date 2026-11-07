@@ -478,9 +478,9 @@ bound.
   player from another mod (a machine that uses blocks). Spectators get the vanilla interaction.
 - A binding whose graph the active content lacks gives the player nothing: no conversation and no vanilla interaction.
   Staff see it as `[missing graph]` in `/haruhi bindings`. A missing speaker profile only changes the name shown.
-- A block conversation is tied to the block's position, like a notice board's: it ends when the player moves more than
-  8 blocks from the block's centre (more for a player whose block reach is above 5 blocks: their reach plus 3, up to
-  64), changes dimension, dies or leaves. It does not end when the block is broken meanwhile.
+- A block conversation is tied to the block's position: it ends when the player moves more than 8 blocks from the
+  block's centre (more for a player whose block reach is above 5 blocks: their reach plus 3, up to 64), changes
+  dimension, dies or leaves. It does not end when the block is broken meanwhile.
 - An entity conversation is tied to the entity: it ends when the entity is more than 8 blocks from the player, dies or
   changes dimension, or when the player dies or leaves. The entity keeps doing what it does, so give a mob that should
   stay put `NoAI`. Actions that need a Haruhi NPC, such as `haruhi:animation`, do nothing on other entities.
@@ -566,13 +566,15 @@ The bundle town.json links outside /srv/minecraft/config/haruhi/bundles
 ## Flags and visits
 
 Flags and visit counts belong to a character, which is the player's UUID. A flag is an integer; an unset flag reads 0.
-A visit count is kept per dialogue graph and NPC profile, and counts the conversations the player opened with it.
+A visit count is kept per dialogue graph and NPC profile, and counts the conversations the player opened with it. A
+bound block or entity counts under the binding's speaker profile, and one bound without a speaker, like a graph opened
+by command, under `haruhi:none`.
 
 ### Loading
 
 - A player's flags and visit counts load in the background when the player joins.
 - A conversation opened before they have loaded waits, then starts once they load, provided the player is still
-  within 8 blocks of the NPC.
+  within 8 blocks of the NPC or bound entity, or within range of the bound block.
 - A load that fails is logged, the waiting conversation is dropped, and the load is retried every 100 ticks (5 seconds)
   while the player stays online.
 
@@ -664,9 +666,11 @@ same flags: the last write of each flag wins.
 | `haruhi:give could not hand <table> to <uuid> before the server stopped; the once flag is set, so grant it by hand` | A reward was waiting for a dead or offline player when the server stopped. | Give the items by hand. |
 | `Dropped the haruhi:give of <table> for <uuid>: the server has stopped after its once flag was stored, so it must be granted by hand` | The flag write finished after the server stopped. | Give the items by hand. |
 | `Dialogue action failed at <graph>#<node>; ending the conversation` | An action threw an error; the stack trace follows. | Fix the action in the bundle, or report the error. |
+| `A router condition failed at <graph>#<node>; ending the conversation` or `A choice condition or provider failed at <graph>#<node>; ending the conversation` | A condition in a router branch's `only_if`, or a choice's condition or provider, threw an error; the stack trace follows. | Fix the condition in the bundle, or report the error to the mod that registers it. |
 | `Dialogue <graph> entered more than 64 nodes in one step; ending the conversation` | Routers or `haruhi:goto` actions loop without showing a node. | Break the loop in the graph. |
 | `Dialogue <graph> would open past 8 graphs in one step; not opened` | A chain of `haruhi:open` actions is longer than 8. | Shorten the chain. |
 | `haruhi:predicate <id> is not in the server's predicate registry; test is false` | A `haruhi:predicate` names a predicate the server's data packs lack. | Add the predicate, or fix the bundle. |
 | `Haruhi storage closed before this operation ran` | A storage call was queued when storage closed at shutdown. | Nothing, unless it appears while the server is running. |
 | Right-clicking an NPC does nothing | The NPC's profile is missing from the active content, has no `dialogue`, or no content is active. | `/haruhi content status`, then check the profile. |
+| Using a bound block or entity does nothing, and its vanilla use does not happen either | The active content lacks the binding's graph. | `/haruhi bindings all` marks it `[missing graph]`; activate content that has the graph, or bind another one. |
 | `<name>'s dialogue data is still loading; try again` | The player joined moments ago, or the load keeps failing. | Wait, then check the log for load errors. |
