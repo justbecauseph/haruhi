@@ -76,13 +76,13 @@ cd haruhi
 `build` compiles the mod, runs the unit tests and runs the server GameTests. `./gradlew assemble` builds the jar
 without running any tests.
 
-The mod jar is `build/libs/haruhi-0.1.0.jar`; `build/libs/haruhi-0.1.0-sources.jar` holds the sources. The PostgreSQL
+The mod jar is `build/libs/haruhi-0.2.0.jar`; `build/libs/haruhi-0.2.0-sources.jar` holds the sources. The PostgreSQL
 JDBC driver 42.7.7 and HikariCP 7.1.0 are nested inside the mod jar (jar-in-jar, under `META-INF/jars/`), so a server
 needs nothing else to use PostgreSQL.
 
 ## Quick start for a server operator
 
-1. Put `haruhi-0.1.0.jar` and Fabric API in the server's `mods/` folder. Give each player the same two jars, plus
+1. Put `haruhi-0.2.0.jar` and Fabric API in the server's `mods/` folder. Give each player the same two jars, plus
    GeckoLib 5.5.5, for their client's `mods/` folder.
 2. Start the server. The first start writes `config/haruhi.json` (in-memory storage) and `config/haruhi-dialogue.json`
    (no command actions allowed), and activates the seed bundle built into the jar. The log shows:

@@ -252,11 +252,11 @@ repositories {
 }
 
 dependencies {
-    implementation "town.lampas:haruhi:0.1.0"
+    implementation "town.lampas:haruhi:0.2.0"
 }
 ```
 
-Declare `"depends": { "haruhi": ">=0.1.0" }` in your `fabric.mod.json`. To build against a checkout of the Haruhi
+Declare `"depends": { "haruhi": ">=0.2.0" }` in your `fabric.mod.json`. To build against a checkout of the Haruhi
 repository instead, for a change that is not published yet, add `includeBuild('../haruhi')` to your
 `settings.gradle`: Gradle substitutes the dependency with that build. [Alina](https://github.com/justbecauseph/alina)
 does both, and builds against the published jar when no checkout sits beside it.
@@ -530,7 +530,7 @@ of `./gradlew`.
 | Task | Does |
 |---|---|
 | `./gradlew build` | compiles, builds the jars, runs `test` and, through `check`, `runGameTest` |
-| `./gradlew assemble` | builds `build/libs/haruhi-0.1.0.jar` and the sources jar without running tests |
+| `./gradlew assemble` | builds `build/libs/haruhi-0.2.0.jar` and the sources jar without running tests |
 | `./gradlew test` | the JUnit 5 unit tests, including `ArchitectureTest` and the converter tests |
 | `./gradlew runGameTest` | the server GameTests |
 | `./gradlew runClient` | a development client with Haruhi and GeckoLib, for checking the screen and the renderer by hand |
