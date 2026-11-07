@@ -149,12 +149,13 @@ or left out on a small window. It picks, in order:
 1. the node's `portrait`, or the speaking profile's `portrait` when the node names none, if the player's client has
    that texture. A node portrait the client lacks does not fall back to the profile's. It is stretched to the square,
    so make portraits square;
-2. a 3D render of the speaking NPC's head and shoulders, when the speaker is the NPC the player is talking to and it is
-   loaded on the client;
+2. a 3D render of the speaker's head and shoulders, when the speaker is the NPC or bound entity the player is talking
+   to and it is loaded on the client;
 3. no headshot: the text starts at the box's left edge.
 
-A conversation opened by command has no NPC, so it only shows portraits. A node whose `speaker` is a different
-profile than the NPC being talked to shows that profile's portrait or nothing.
+A conversation opened by command or at a bound block has no entity, so it only shows portraits. A node whose `speaker`
+is a different profile than the NPC being talked to shows that profile's portrait or nothing. A bound entity that is
+not a Haruhi NPC is framed on the top of its hitbox, and plays no animations.
 
 The 3D render turns the body 25 degrees so the face looks toward the text, and the camera looks down at it by 8
 degrees. It is framed on the model's head:

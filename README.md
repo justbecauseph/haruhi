@@ -17,6 +17,9 @@ GeckoLib. Each player's dialogue flags and visit counts are stored in memory or 
   moves above it.
 - The NPC entity stays where it is spawned, takes no damage except from `/kill` and the void, turns to face the player
   who talks to it, and scales from 1/16 up to 4 times normal size.
+- `/haruhi bind` attaches a graph to a placed block or to any existing entity, such as a vanilla villager or an armor
+  stand. Using it opens the conversation in place of its vanilla interaction, so a bound chest does not open and a bound
+  villager does not trade. `/haruhi bindings` lists them and marks those whose graph the active content lacks.
 - Clients draw NPCs with GeckoLib models and animations, or with the vanilla player model when GeckoLib is not
   installed.
 - The server caches flags and visit counts per character. Flag changes are written to storage in batches, visit counts
@@ -54,6 +57,9 @@ the server; the [server guide](docs/server-guide.md#which-side-needs-what) expla
 - Models, textures, animations and portraits are client assets. The server sends only their ids, so each client needs
   them from a resource pack or a mod.
 - The default in-memory storage loses every flag, visit count and imported revision when the server stops.
+- `/haruhi bindings` lists bound entities only while they are loaded, because an entity binding is saved on the entity.
+  A block binding applies only while the block it was made on is at its position; see the
+  [server guide](docs/server-guide.md#binding-behaviour) for breaking and replacing a bound block.
 
 ## Build from source
 
@@ -111,7 +117,7 @@ PostgreSQL before players depend on them: see [Storage configuration](docs/serve
 
 | Guide | For | Covers |
 |---|---|---|
-| [Server guide](docs/server-guide.md) | server operators | installing, configuration files, storage and PostgreSQL, every `/haruhi` command, content revisions, flag persistence, troubleshooting |
+| [Server guide](docs/server-guide.md) | server operators | installing, configuration files, storage and PostgreSQL, every `/haruhi` command, block and entity bindings, content revisions, flag persistence, troubleshooting |
 | [Content guide](docs/content-guide.md) | content writers | the bundle format, NPC profiles, dialogue graphs, built-in conditions and actions |
 | [Bundle JSON Schema](docs/bundle.schema.json) | content writers | a JSON Schema of the bundle format and built-in arguments for editors; setup is in the content guide |
 | [Models and animations](docs/models-and-animations.md) | model makers | Blockbench models, the `.bbmodel` converter, textures, animations, portraits |

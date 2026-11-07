@@ -109,7 +109,7 @@
           "description": "Makes the node a router: it shows nothing and enters one branch, picked by weight."
         },
         "on_enter": { "type": "array", "items": { "$ref": "#/$defs/action" }, "description": "Actions run, in order, every time the node is entered." },
-        "speaker": { "$ref": "#/$defs/id", "description": "NPC profile id whose name and portrait the box shows. Default: the NPC being talked to." },
+        "speaker": { "$ref": "#/$defs/id", "description": "NPC profile id whose name and portrait the box shows. Default: the NPC being talked to, or the speaker of the block or entity binding that opened the graph." },
         "portrait": { "$ref": "#/$defs/id", "description": "Texture id of a portrait for this node only." },
         "animation": { "type": "string", "description": "Animation the speaking NPC plays when the node shows." }
       },

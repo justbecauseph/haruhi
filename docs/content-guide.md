@@ -11,6 +11,7 @@ Related pages: [README](../README.md), [server guide](server-guide.md) (installi
 - [NPC profiles](#npc-profiles)
 - [Dialogue graphs and nodes](#dialogue-graphs-and-nodes)
 - [How a conversation runs](#how-a-conversation-runs)
+- [Bindings: blocks and entities](#bindings-blocks-and-entities)
 - [Flags and visits](#flags-and-visits)
 - [Built-in conditions](#built-in-conditions)
 - [Built-in actions](#built-in-actions)
@@ -199,7 +200,7 @@ There are three kinds of node:
 | `next` | line, menu | none | Node to move to on continue. On a menu it is used only when every choice is hidden. |
 | `random` | router | none | Array of `{"node": "<id>", "weight": <whole number>}`. Each weight must be above 0, and the weights may add up to at most 2147483647. A branch's chance is its weight over the total. |
 | `on_enter` | all | `[]` | Actions run, in order, every time the node is entered. |
-| `speaker` | line, menu | the NPC being talked to | NPC profile id whose name and portrait the box shows. Must be an NPC in the bundle. |
+| `speaker` | line, menu | the NPC being talked to, or the binding's speaker | NPC profile id whose name and portrait the box shows. Must be an NPC in the bundle. |
 | `portrait` | line, menu | the speaker's `portrait` | Texture id of a 2D portrait for this node only. |
 | `animation` | line, menu | none | Animation name the speaking NPC plays when the node shows. |
 
@@ -210,9 +211,13 @@ conversation never follows it and the reachability check does not count it.
 
 - With no `speaker`, the NPC the player is talking to speaks. A conversation opened by command has no NPC, so its
   nodes show no name unless they set `speaker`.
-- The 3D head render in the dialogue box and the node's `animation` only apply when the speaker is the NPC being
-  talked to. A node whose `speaker` is a different profile shows that profile's name and its `portrait` if it has
-  one, and no 3D head.
+- A graph bound to a block or entity (see [Bindings](#bindings-blocks-and-entities)) is spoken, on nodes with no
+  `speaker`, by the binding's speaker profile, or without one by the block or entity itself under its own name, such
+  as "Lectern" or "Librarian". A bound living entity (a villager, an armor stand, a mob) is drawn as the 3D head;
+  other entities, such as an `interaction` entity or an item frame, and blocks have none.
+- The 3D head render in the dialogue box applies when the speaker is the entity being talked to, and the node's
+  `animation` only when that entity is a Haruhi NPC. A node whose `speaker` is a different profile shows that profile's
+  name and its `portrait` if it has one, and no 3D head.
 - A portrait that the player's client does not have is skipped, and the 3D head shows instead when it can.
 
 ### Choices
@@ -245,8 +250,9 @@ Each type refuses arguments it does not take.
 
 ## How a conversation runs
 
-A conversation opens when a player right-clicks an NPC that has a `dialogue`, when a command opens a graph, or when a
-`haruhi:open` action opens another graph. Opening a conversation ends the player's current one. If the player's flags
+A conversation opens when a player right-clicks an NPC that has a `dialogue`, uses a block or entity bound to a graph,
+when a command opens a graph, or when a `haruhi:open` action opens another graph. Opening a conversation ends the
+player's current one. If the player's flags
 have not loaded yet (just after joining), the open waits for them. Each open records a visit (see
 [Flags and visits](#flags-and-visits)), then enters the `start` node.
 
@@ -294,7 +300,8 @@ the player can only leave with Escape, so give every menu at least one choice th
 A conversation also ends when:
 
 - the player presses Escape, or Cancel in the vanilla dialog;
-- the NPC is more than 8 blocks away, dead or unloaded, or in another dimension;
+- the NPC or bound entity is more than 8 blocks away, dead or unloaded, or in another dimension;
+- for a bound block, the player moves more than 8 blocks from it or changes dimension;
 - the player dies, respawns or leaves;
 - a condition, action or provider fails while running (the server logs the error);
 - more than 64 nodes are entered in one step, which catches loops of routers and jumps;
@@ -303,6 +310,25 @@ A conversation also ends when:
 
 Branching without the player is only random: there is no built-in "if" jump. To branch on a flag or a world
 condition, put the branches in choices with `only_if`.
+
+## Bindings: blocks and entities
+
+A graph does not have to belong to an NPC. Staff can bind any graph of the active content to a placed block, such as a
+lectern, a sign or a chest, or to an existing entity that is not a Haruhi NPC, such as a vanilla villager, an armor
+stand or an `interaction` entity, with `/haruhi bind` (see the
+[server guide](server-guide.md#haruhi-bind-unbind-and-bindings)). Using the block or entity then opens the graph in
+place of its vanilla interaction.
+
+Bindings live in the world, not in the bundle, so the bundle format has nothing for them. What the writer controls:
+
+- The graph. Write it as any other graph; it needs no NPC profile. A bound graph that a later revision drops opens
+  nothing, so keep its id when you rework it.
+- The optional speaker profile given when binding. Nodes with no `speaker` show its name and portrait, and visits count
+  under it, so a villager bound with the profile `shop:mira` is Mira for `haruhi:visits`. Without one, those nodes
+  show the block's or entity's own name, and visits count under `haruhi:none`.
+- `haruhi:open`, `haruhi:goto` and the rest work as in any conversation. A graph chained with `haruhi:open` keeps the
+  block or entity and the speaker. `haruhi:animation` and a node's `animation` play only on Haruhi NPCs, so they do
+  nothing in a bound conversation.
 
 ## Flags and visits
 
@@ -329,7 +355,8 @@ and the value lists the flag names in it. A flag name is any non-empty string wi
 
 Visits count how many times a character has opened a graph with an NPC profile. The count goes up when the graph
 opens, so the current conversation is included: the first conversation reads 1. All NPCs with the same profile share
-one count. A graph opened by command counts under the profile id `haruhi:none`. Read visits with `haruhi:visits`.
+one count. A graph bound to a block or entity counts under the binding's speaker profile. A graph opened by command,
+or bound without a speaker profile, counts under the profile id `haruhi:none`. Read visits with `haruhi:visits`.
 
 ## Built-in conditions
 
@@ -635,9 +662,9 @@ Layout:
 
 - A text box runs along the bottom of the screen. The world stays visible around it, and the game is not paused.
 - At the box's top left, a square headshot shows the speaker: the node's or profile's portrait when the client has the
-  texture, else a 3D render of the NPC's head and shoulders when the speaker is the NPC being talked to and it is
-  loaded. With neither, there is no headshot and the text starts at the box's left edge. On a very small window the
-  headshot is left out.
+  texture, else a 3D render of the head and shoulders of the NPC or bound entity being talked to, when it is the
+  speaker and it is loaded. With neither, there is no headshot and the text starts at the box's left edge. On a very
+  small window the headshot is left out.
 - Right of the headshot: the speaker's name, a divider, and the text, which types out character by character. The box
   grows with the text, up to the room left above it for the choices. Text does not scroll, so split long speeches
   across nodes.

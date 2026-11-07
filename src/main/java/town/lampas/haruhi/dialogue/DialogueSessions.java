@@ -22,6 +22,7 @@ import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.dialogue.api.DialogueAnchor;
 import town.lampas.haruhi.dialogue.api.DialogueFlags;
 import town.lampas.haruhi.dialogue.api.DialogueService;
+import town.lampas.haruhi.dialogue.api.DialogueSpeaker;
 import town.lampas.haruhi.dialogue.flags.CharacterCache;
 import town.lampas.haruhi.dialogue.flags.CharacterStore;
 import town.lampas.haruhi.dialogue.flags.PlayerFlags;
@@ -58,8 +59,9 @@ public final class DialogueSessions implements DialogueService {
     }
 
     @Override
-    public boolean open(ServerPlayer player, Identifier graphId, @Nullable Entity interlocutor) {
-        return open(player, graphId, new Ties(interlocutor, null), 0);
+    public boolean open(ServerPlayer player, Identifier graphId, @Nullable Entity interlocutor,
+            DialogueSpeaker speaker) {
+        return open(player, graphId, new Ties(interlocutor, null, Objects.requireNonNull(speaker, "speaker")), 0);
     }
 
     /**
@@ -67,11 +69,12 @@ public final class DialogueSessions implements DialogueService {
      * for a conversation the next tick would end.
      */
     @Override
-    public boolean openAt(ServerPlayer player, Identifier graphId, DialogueAnchor anchor) {
+    public boolean openAt(ServerPlayer player, Identifier graphId, DialogueAnchor anchor, DialogueSpeaker speaker) {
+        Objects.requireNonNull(speaker, "speaker");
         if (!Objects.requireNonNull(anchor, "anchor").holds(player)) {
             return false;
         }
-        return open(player, graphId, new Ties(null, anchor), 0);
+        return open(player, graphId, new Ties(null, anchor, speaker), 0);
     }
 
     /** Ends the player's conversation, including one still queued for their flags, which then never starts. */
@@ -236,7 +239,7 @@ public final class DialogueSessions implements DialogueService {
                     compiledGraph.error().map(error -> error.message()).orElse("unreadable"));
             return false;
         }
-        VisitKey key = new VisitKey(graphId, npcOf(interlocutor));
+        VisitKey key = new VisitKey(graphId, npcOf(interlocutor, ties.speaker()));
         Instant now = Instant.now();
         int visits = state.cache.recordVisit(key, now);
         store.recordVisit(player.getUUID(), key, now).whenComplete((saved, error) -> {
@@ -244,8 +247,8 @@ public final class DialogueSessions implements DialogueService {
                 Haruhi.LOGGER.error("Could not record a visit to {} for {}", graphId, player.getUUID(), error);
             }
         });
-        DialogueSession session = new DialogueSession(nextSessionId(), player, interlocutor, ties.anchor(), bundle,
-                graph.get(), state.flags, visits, player.level().getRandom());
+        DialogueSession session = new DialogueSession(nextSessionId(), player, interlocutor, ties.anchor(),
+                ties.speaker(), bundle, graph.get(), state.flags, visits, player.level().getRandom());
         sessions.put(player.getUUID(), session);
         apply(player, session, runner.start(session), depth);
         return true;
@@ -336,11 +339,15 @@ public final class DialogueSessions implements DialogueService {
         return lastSessionId;
     }
 
-    private static Identifier npcOf(@Nullable Entity interlocutor) {
-        if (interlocutor == null) {
-            return VisitKey.NO_NPC;
-        }
-        return HaruhiServices.npc().profileId(interlocutor).orElse(VisitKey.NO_NPC);
+    /**
+     * The profile a visit counts under: the interlocutor NPC's, else the speaker's, else {@link VisitKey#NO_NPC}, so a
+     * villager bound with a speaker profile counts as that character.
+     */
+    private static Identifier npcOf(@Nullable Entity interlocutor, DialogueSpeaker speaker) {
+        Optional<Identifier> npc = interlocutor == null
+                ? Optional.empty()
+                : HaruhiServices.npc().profileId(interlocutor);
+        return npc.or(speaker::profile).orElse(VisitKey.NO_NPC);
     }
 
     /**
@@ -384,10 +391,13 @@ public final class DialogueSessions implements DialogueService {
     /** An open requested before the player's cache loaded. */
     private record PendingOpen(Identifier graph, Ties ties) {}
 
-    /** What a conversation is tied to: an interlocutor, an anchor, both, or neither. A chained open keeps them. */
-    record Ties(@Nullable Entity interlocutor, @Nullable DialogueAnchor anchor) {
+    /**
+     * What a conversation is tied to (an interlocutor, an anchor, both, or neither) and who speaks for it. A chained open
+     * keeps them.
+     */
+    record Ties(@Nullable Entity interlocutor, @Nullable DialogueAnchor anchor, DialogueSpeaker speaker) {
         static Ties of(DialogueSession session) {
-            return new Ties(session.interlocutor(), session.anchor());
+            return new Ties(session.interlocutor(), session.anchor(), session.speaker());
         }
     }
 }

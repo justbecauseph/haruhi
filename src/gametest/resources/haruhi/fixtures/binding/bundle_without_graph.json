@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "dialogues": {
+    "haruhi:fixture/elsewhere": {
+      "start": "hello",
+      "nodes": {
+        "hello": { "text": "Not the bound conversation." }
+      }
+    }
+  }
+}

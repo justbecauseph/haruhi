@@ -14,7 +14,10 @@ public interface DialogueContext {
 
     ServerPlayer player();
 
-    /** The entity the player is talking to, usually an NPC; empty for a conversation opened by a block or command. */
+    /**
+     * The entity the player is talking to: an NPC, or any entity a binding opened the graph on; empty for a conversation
+     * opened at a block or by command.
+     */
     Optional<Entity> interlocutor();
 
     /** The place the conversation is tied to, for one opened with {@link DialogueService#openAt}; otherwise empty. */
@@ -33,7 +36,10 @@ public interface DialogueContext {
     /** The player's flags. Reads are from the cache loaded on join; writes are persisted by the dialogue module. */
     DialogueFlags flags();
 
-    /** How many times this character has opened this graph with this NPC, counting the current conversation. */
+    /**
+     * How many times this character has opened this graph with this NPC profile, counting the current conversation. The
+     * profile is the interlocutor NPC's, else the {@link DialogueSpeaker} profile, else none ({@code haruhi:none}).
+     */
     int visits();
 
     /** After the current actions, move to this node instead of the choice's {@code next}. */

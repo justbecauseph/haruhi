@@ -9,7 +9,8 @@
       "town.lampas.haruhi.gametest.StorageGameTests",
       "town.lampas.haruhi.gametest.ContentGameTests",
       "town.lampas.haruhi.gametest.NpcGameTests",
-      "town.lampas.haruhi.gametest.DialogueGameTests"
+      "town.lampas.haruhi.gametest.DialogueGameTests",
+      "town.lampas.haruhi.gametest.BindingGameTests"
     ]
   },
   "depends": {

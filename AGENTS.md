@@ -4,6 +4,7 @@ Haruhi is a Fabric 26.2 mod for scriptable NPCs:
 - data-driven dialogue graphs, edited as one JSON content bundle;
 - a visual-novel dialogue screen, with vanilla dialogs as the fallback for a client without Haruhi's dialogue channel;
 - NPCs rendered with Blockbench models through GeckoLib;
+- conversations bound to placed blocks and to existing entities that are not Haruhi NPCs;
 - per-character dialogue flags and visit counts.
 
 In practice every client needs Haruhi: the `haruhi:npc` entity type is a synced registry entry, so Fabric API's registry
@@ -49,12 +50,13 @@ The Guild itself is a later consumer and is not in this repository.
 |---|---|---|---|
 | storage | `town.lampas.haruhi.storage` (except the contract files below), `src/main/resources/haruhi/migrations/` | `StorageModule`, config `config/haruhi.json`, in-memory and PostgreSQL (`HikariCP`, versioned SQL migrations) implementations of `HaruhiStorage` | nothing |
 | content | `town.lampas.haruhi.content` (except the contract files), `src/main/resources/haruhi/seed_bundle.json` | `ContentModule`: JSON codecs for the bundle format below, full validation, SHA-256 digest, revisions through `HaruhiStorage`, activation on startup, `/haruhi content` commands | storage (interface), `DialogueRegistries` for parsing specs |
-| dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` | `DialogueModule`: sessions (tied to an NPC or, through `openAt`, to a place), graph runtime, node text resolved for the player when sent, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
+| dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` | `DialogueModule`: sessions (tied to an NPC or, through `openAt`, to a place, with an optional `DialogueSpeaker` for nodes that name no speaker), graph runtime, node text resolved for the player when sent, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
+| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings in per-dimension saved data (`BlockBindings`, `<dimension>/data/haruhi/block_bindings.dat`), entity bindings as the persistent Fabric attachment `haruhi:binding` (`EntityBindings`), the server-side `UseBlockCallback` and `UseEntityCallback` that open a bound graph in place of the vanilla interaction, the `PlayerBlockBreakEvents.AFTER` listener that drops a broken block's binding, `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings` | content (`ContentService`), dialogue (`DialogueService`), npc (`NpcControl`) |
 | npc and client | `town.lampas.haruhi.npc` (except `NpcControl`), `town.lampas.haruhi.client` (except `HaruhiClient`), `assets/haruhi/**` | `NpcModule`: entity type, profile and look syncing, interaction, `/haruhi npc` commands, `NpcControl`. `NpcClient`: GeckoLib replaced-entity renderer, vanilla player-model fallback, default humanoid model and animations, animation payload receiver. `DialogueClient`: the visual-novel screen; while it is open, `DialogueHud` hides the vanilla HUD elements under its box (hotbar, status bars, experience bar and level, held-item name, crosshair) and moves the chat above the box | content (`ContentService`), dialogue (`DialogueService`), the payloads |
 
-Initialisation order, in `Haruhi.onInitialize`: payload types, storage, content, dialogue, npc. A module may read the
-services of the modules before it from `HaruhiServices`. A module that needs a later one, such as dialogue needing
-`NpcControl`, reads it lazily at use time, never during `init()`.
+Initialisation order, in `Haruhi.onInitialize`: payload types, storage, content, dialogue, npc, binding. A module may
+read the services of the modules before it from `HaruhiServices`. A module that needs a later one, such as dialogue
+needing `NpcControl`, reads it lazily at use time, never during `init()`.
 
 ### Contracts
 
@@ -70,7 +72,7 @@ with the reason, in your final message.
 - `build.gradle`, `gradle.properties`, `settings.gradle`, `.github/workflows/release.yml`, `src/main/resources/fabric.mod.json`, both mixin configs, `src/gametest/resources/fabric.mod.json`, `src/test/java/town/lampas/haruhi/ArchitectureTest.java`
 
 Each component writes its GameTests in its own class, already listed in the GameTest entrypoints:
-`town.lampas.haruhi.gametest.{Storage,Content,Npc,Dialogue}GameTests`. Each also adds unit tests under
+`town.lampas.haruhi.gametest.{Storage,Content,Npc,Dialogue,Binding}GameTests`. Each also adds unit tests under
 `src/test/java/town/lampas/haruhi/<component>/`. GameTest fixtures go in
 `src/gametest/resources/haruhi/fixtures/<component>/`.
 
@@ -216,6 +218,27 @@ fixture use exactly these.
 | action | `haruhi:command` | `command`: run as the player at the permission level set in `config/haruhi-dialogue.json`. Only runs when the command's first word is on that file's allowlist, which is empty by default. A command not on the list is a validation error. |
 
 Haruhi registers no providers itself. The API exists for consumers such as the Guild board.
+
+## Bindings
+
+The binding component attaches a graph to a placed block or to an entity that is neither a player nor a `haruhi:npc`.
+The server guide's "/haruhi bind, unbind and bindings" and "Binding behaviour" sections are the user-facing reference;
+keep them in step.
+
+- Commands, all for gamemasters: `/haruhi bind block <pos> <graph> [<speaker>]`, `/haruhi bind entity <targets> <graph>
+  [<speaker>]`, `/haruhi unbind block <pos>`, `/haruhi unbind entity <targets>`, `/haruhi bindings [all]`. `<graph>`
+  and `<speaker>` (an NPC profile) are checked against the active content when bound.
+- A main-hand use of a bound block or entity opens the graph and never reaches vanilla. The off hand and Fabric fake
+  players get nothing; spectators get vanilla. A graph the active revision lacks opens nothing, and the vanilla
+  interaction is still skipped. A `UseItemCallback` refuses the held item's use in the tick of a consumed use and the
+  next, because a client that predicted a passing block or entity use sends one.
+- A block opens with `openAt` on an anchor at the block's centre, 8 blocks (a longer block reach plus 3, up to 64); an
+  entity with `open`, the entity as the interlocutor. Both pass `DialogueSpeaker.of(speaker, <block or entity name>)`, so visits count under the speaker
+  profile, else `haruhi:none`.
+- A block binding stores the block id at bind time and applies only while that block is there. A player breaking that
+  block removes the binding; any other change leaves it inactive until the block is back. `BlockBindings` loads in
+  `ServerLevelEvents.LOAD`, so no use reads the file. An entity binding is the persistent
+  attachment `haruhi:binding`, not copied on mob conversion and not synced.
 
 ## Blockbench model converter
 
