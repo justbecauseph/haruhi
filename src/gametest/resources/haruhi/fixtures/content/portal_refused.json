@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "flags": {
+    "haruhi:fixture/portal": ["met"]
+  },
+  "npcs": {
+    "haruhi:fixture/portal": {
+      "name": "Clerk",
+      "texture": "minecraft:textures/entity/player/wide/steve.png"
+    }
+  },
+  "dialogues": {
+    "haruhi:fixture/portal_refused": {
+      "start": "hello",
+      "nodes": {
+        "hello": {
+          "speaker": "haruhi:fixture/nobody",
+          "text": "Who am I?",
+          "on_enter": [ { "type": "haruhi:flag/set", "namespace": "haruhi:fixture/portal", "flag": "undeclared" } ]
+        }
+      }
+    },
+    "haruhi:fixture/portal_orphan": {
+      "start": "hello",
+      "nodes": {
+        "hello": { "text": "Hello." },
+        "orphan": { "text": "Nothing leads here." }
+      }
+    }
+  }
+}

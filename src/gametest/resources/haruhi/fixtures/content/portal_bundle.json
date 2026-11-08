@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "flags": {
+    "haruhi:fixture/portal": ["met"]
+  },
+  "npcs": {
+    "haruhi:fixture/portal": {
+      "name": "Mira’s Clerk",
+      "texture": "minecraft:textures/entity/player/wide/steve.png",
+      "dialogue": "haruhi:fixture/portal"
+    }
+  },
+  "dialogues": {
+    "haruhi:fixture/portal": {
+      "start": "hello",
+      "nodes": {
+        "hello": {
+          "speaker": "haruhi:fixture/portal",
+          "text": "This came from the Portal.",
+          "choices": [
+            {
+              "text": "Thanks.",
+              "next": "bye",
+              "actions": [ { "type": "haruhi:flag/set", "namespace": "haruhi:fixture/portal", "flag": "met" } ]
+            }
+          ]
+        },
+        "bye": { "text": "Safe travels." }
+      }
+    }
+  }
+}

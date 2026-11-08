@@ -4,7 +4,8 @@
   "package": "town.lampas.haruhi.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "DialogueClickMixin"
+    "DialogueClickMixin",
+    "JsonRpcParamsLogMixin"
   ],
   "injectors": {
     "defaultRequire": 1

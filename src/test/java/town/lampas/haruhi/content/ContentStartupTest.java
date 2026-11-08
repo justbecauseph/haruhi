@@ -160,7 +160,8 @@ class ContentStartupTest {
     }
 
     private static StoredRevision revision(long id, String bundleJson) {
-        return new StoredRevision(id, "digest-" + id, bundleJson, "tester", Instant.EPOCH, Optional.empty(), true);
+        return new StoredRevision(
+                id, "digest-" + id, bundleJson, "tester", Instant.EPOCH, Optional.empty(), Optional.empty(), true);
     }
 
     /** The base bundle with its one NPC renamed, so each source is recognisable after activation. */

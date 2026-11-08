@@ -10,7 +10,6 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -32,7 +31,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 import town.lampas.haruhi.api.HaruhiServices;
@@ -195,49 +193,20 @@ final class BindingCommands {
      *         null for every dimension
      */
     static List<String> describeAll(MinecraftServer server, @Nullable ServerLevel nearLevel, @Nullable Vec3 near) {
-        ContentBundle content = HaruhiServices.content().active();
+        BindingService.Listing scan = BindingServiceImpl.scan(server, nearLevel, near, NEAR_RADIUS);
         List<String> blocks = new ArrayList<>();
         List<String> entities = new ArrayList<>();
         int problems = 0;
-        for (ServerLevel level : server.getAllLevels()) {
-            if (nearLevel != null && level != nearLevel) {
-                continue;
-            }
-            for (BlockBindings.Entry entry : BlockBindings.of(level).entries()) {
-                if (near != null && !Vec3.atCenterOf(entry.pos()).closerThan(near, NEAR_RADIUS)) {
-                    continue;
-                }
-                BlockBinding binding = entry.binding();
-                // A binding in an unloaded chunk is listed without loading it, so its block cannot be checked.
-                Optional<Identifier> blockNow = level.isLoaded(entry.pos())
-                        ? Optional.of(BlockBinding.blockId(level.getBlockState(entry.pos())))
-                        : Optional.empty();
-                List<String> found = blockNow
-                        .map(id -> BindingProblems.of(binding, content, id))
-                        .orElseGet(() -> BindingProblems.of(binding.binding(), content));
-                problems += found.isEmpty() ? 0 : 1;
-                blocks.add("block " + binding.block() + " at " + describe(level, entry.pos()) + " -> "
-                        + binding.graph() + BindingProblems.speakerSuffix(binding.speaker())
-                        + (blockNow.isEmpty() ? " (chunk not loaded)" : "") + BindingProblems.suffix(found));
-            }
-            List<Entity> bound = new ArrayList<>();
-            Iterable<Entity> candidates = near == null
-                    ? level.getAllEntities()
-                    : level.getEntities((Entity) null, AABB.ofSize(near, 2 * NEAR_RADIUS, 2 * NEAR_RADIUS,
-                            2 * NEAR_RADIUS), entity -> entity.position().closerThan(near, NEAR_RADIUS));
-            for (Entity entity : candidates) {
-                if (EntityBindings.get(entity).isPresent()) {
-                    bound.add(entity);
-                }
-            }
-            bound.sort(Comparator.comparing(Entity::getStringUUID));
-            for (Entity entity : bound) {
-                Binding binding = EntityBindings.get(entity).orElseThrow();
-                List<String> found = BindingProblems.of(binding, content);
-                problems += found.isEmpty() ? 0 : 1;
-                entities.add("entity " + describe(entity) + " -> " + binding.graph()
-                        + BindingProblems.speakerSuffix(binding.speaker()) + BindingProblems.suffix(found));
-            }
+        for (BindingService.BoundBlock block : scan.blocks()) {
+            problems += block.problems().isEmpty() ? 0 : 1;
+            blocks.add("block " + block.block() + " at " + describe(block) + " -> " + block.graph()
+                    + BindingProblems.speakerSuffix(block.speaker()) + (block.loaded() ? "" : " (chunk not loaded)")
+                    + BindingProblems.suffix(block.problems()));
+        }
+        for (BindingService.BoundEntity entity : scan.entities()) {
+            problems += entity.problems().isEmpty() ? 0 : 1;
+            entities.add("entity " + describe(entity) + " -> " + entity.graph()
+                    + BindingProblems.speakerSuffix(entity.speaker()) + BindingProblems.suffix(entity.problems()));
         }
         List<String> lines = new ArrayList<>(1 + blocks.size() + entities.size());
         String scope = near == null ? "Haruhi bindings" : "Haruhi bindings within " + NEAR_RADIUS + " blocks";
@@ -305,5 +274,15 @@ final class BindingCommands {
                 BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()),
                 entity.getName().getString(), entity.getStringUUID(), entity.level().dimension().identifier(),
                 entity.getX(), entity.getY(), entity.getZ());
+    }
+
+    private static String describe(BindingService.BoundBlock block) {
+        return String.format(Locale.ROOT, "%d %d %d in %s", block.pos().getX(), block.pos().getY(), block.pos().getZ(),
+                block.dimension());
+    }
+
+    private static String describe(BindingService.BoundEntity entity) {
+        return String.format(Locale.ROOT, "%s \"%s\" %s in %s at %.2f %.2f %.2f", entity.type(), entity.name(),
+                entity.uuid(), entity.dimension(), entity.position().x, entity.position().y, entity.position().z);
     }
 }

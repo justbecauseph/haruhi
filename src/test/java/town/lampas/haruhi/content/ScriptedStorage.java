@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -90,13 +91,14 @@ final class ScriptedStorage implements HaruhiStorage {
     /** Adds a revision at once, without a call, as if it had been stored before the test. */
     synchronized long add(String bundleJson, Instant createdAt) {
         long id = nextId++;
-        revisions.add(new StoredRevision(id, "digest-" + id, bundleJson, "setup", createdAt, Optional.empty(), false));
+        revisions.add(new StoredRevision(
+                id, "digest-" + id, bundleJson, "setup", createdAt, Optional.empty(), Optional.empty(), false));
         return id;
     }
 
     /** Marks a revision active at once, without a call, as if it had been activated before the test. */
     synchronized void markActive(long id, Instant at) {
-        applyActivation(id, at);
+        applyActivation(id, "setup", at);
     }
 
     synchronized Optional<Long> activeId() {
@@ -148,7 +150,7 @@ final class ScriptedStorage implements HaruhiStorage {
                 .findFirst()
                 .orElseGet(() -> {
                     StoredRevision stored = new StoredRevision(nextId++, digest, bundleJson, author, micros(at),
-                            Optional.empty(), false);
+                            Optional.empty(), Optional.empty(), false);
                     revisions.add(stored);
                     return stored;
                 }));
@@ -167,22 +169,25 @@ final class ScriptedStorage implements HaruhiStorage {
     @Override
     public CompletableFuture<Void> activateRevision(long revisionId, String actor, Instant at) {
         return call("activateRevision " + revisionId, () -> {
-            applyActivation(revisionId, at);
+            applyActivation(revisionId, actor, at);
             return null;
         });
     }
 
-    /** Newest first, by creation time and then id, as the storage contract and both backends order them. */
+    /** Newest first, by id, as the storage contract and both backends order them. */
     @Override
-    public CompletableFuture<List<RevisionSummary>> listRevisions(int limit) {
+    public CompletableFuture<List<RevisionSummary>> listRevisions(OptionalLong before, int limit) {
         return call("listRevisions", () -> revisions.stream()
-                .sorted(Comparator.comparing(StoredRevision::createdAt)
-                        .thenComparingLong(StoredRevision::id)
-                        .reversed())
+                .filter(revision -> before.isEmpty() || revision.id() < before.getAsLong())
+                .sorted(Comparator.comparingLong(StoredRevision::id).reversed())
                 .limit(limit)
-                .map(revision -> new RevisionSummary(revision.id(), revision.digest(), revision.author(),
-                        revision.createdAt(), revision.activatedAt(), revision.active()))
+                .map(StoredRevision::summary)
                 .toList());
+    }
+
+    @Override
+    public String backendName() {
+        return "scripted";
     }
 
     @Override
@@ -217,13 +222,13 @@ final class ScriptedStorage implements HaruhiStorage {
     }
 
     /** The target becomes active with the time; the one that was active keeps its own activation time. */
-    private void applyActivation(long id, Instant at) {
+    private void applyActivation(long id, String actor, Instant at) {
         for (int index = 0; index < revisions.size(); index++) {
             StoredRevision revision = revisions.get(index);
             if (revision.id() == id) {
-                revisions.set(index, with(revision, Optional.of(micros(at)), true));
+                revisions.set(index, with(revision, Optional.of(micros(at)), Optional.of(actor), true));
             } else if (revision.active()) {
-                revisions.set(index, with(revision, revision.activatedAt(), false));
+                revisions.set(index, with(revision, revision.activatedAt(), revision.activatedBy(), false));
             }
         }
     }
@@ -232,9 +237,10 @@ final class ScriptedStorage implements HaruhiStorage {
         return revisions.stream().filter(revision -> revision.id() == id).findFirst();
     }
 
-    private static StoredRevision with(StoredRevision revision, Optional<Instant> activatedAt, boolean active) {
+    private static StoredRevision with(
+            StoredRevision revision, Optional<Instant> activatedAt, Optional<String> activatedBy, boolean active) {
         return new StoredRevision(revision.id(), revision.digest(), revision.bundleJson(), revision.author(),
-                revision.createdAt(), activatedAt, active);
+                revision.createdAt(), activatedAt, activatedBy, active);
     }
 
     private static Instant micros(Instant at) {

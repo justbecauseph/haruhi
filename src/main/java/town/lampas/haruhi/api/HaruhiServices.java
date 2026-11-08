@@ -1,6 +1,7 @@
 package town.lampas.haruhi.api;
 
 import java.util.Objects;
+import town.lampas.haruhi.binding.BindingService;
 import town.lampas.haruhi.content.ContentService;
 import town.lampas.haruhi.dialogue.api.DialogueService;
 import town.lampas.haruhi.npc.NpcControl;
@@ -15,6 +16,7 @@ public final class HaruhiServices {
     private static volatile ContentService content;
     private static volatile DialogueService dialogue;
     private static volatile NpcControl npc;
+    private static volatile BindingService bindings;
 
     private HaruhiServices() {}
 
@@ -34,6 +36,11 @@ public final class HaruhiServices {
         return require(npc, "npc");
     }
 
+    /** The bindings, read only. Set by the binding module, which initialises last. */
+    public static BindingService bindings() {
+        return require(bindings, "binding");
+    }
+
     public static void setStorage(HaruhiStorage value) {
         storage = Objects.requireNonNull(value);
     }
@@ -48,6 +55,10 @@ public final class HaruhiServices {
 
     public static void setNpc(NpcControl value) {
         npc = Objects.requireNonNull(value);
+    }
+
+    public static void setBindings(BindingService value) {
+        bindings = Objects.requireNonNull(value);
     }
 
     private static <T> T require(T value, String name) {

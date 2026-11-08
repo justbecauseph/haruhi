@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -234,23 +235,26 @@ abstract class HaruhiStorageContractTest {
         StoredRevision second = store("digest-b", T1);
         StoredRevision third = store("digest-c", T2);
 
-        await(storage.activateRevision(first.id(), "operator", T1));
-        await(storage.activateRevision(second.id(), "operator", T2));
-        await(storage.activateRevision(third.id(), "operator", T3));
+        await(storage.activateRevision(first.id(), "first", T1));
+        await(storage.activateRevision(second.id(), "second", T2));
+        await(storage.activateRevision(third.id(), "third", T3));
 
         assertEquals(
-                Optional.of(new StoredRevision(first.id(), "digest-a", BUNDLE, "alice", T0, Optional.of(T1), false)),
+                Optional.of(new StoredRevision(
+                        first.id(), "digest-a", BUNDLE, "alice", T0, Optional.of(T1), Optional.of("first"), false)),
                 await(storage.loadRevision(first.id())));
         assertEquals(
-                Optional.of(new StoredRevision(second.id(), "digest-b", BUNDLE, "alice", T1, Optional.of(T2), false)),
+                Optional.of(new StoredRevision(
+                        second.id(), "digest-b", BUNDLE, "alice", T1, Optional.of(T2), Optional.of("second"), false)),
                 await(storage.loadRevision(second.id())));
         assertEquals(
-                Optional.of(new StoredRevision(third.id(), "digest-c", BUNDLE, "alice", T2, Optional.of(T3), true)),
+                Optional.of(new StoredRevision(
+                        third.id(), "digest-c", BUNDLE, "alice", T2, Optional.of(T3), Optional.of("third"), true)),
                 await(storage.loadRevision(third.id())));
         assertEquals(List.of(
-                new RevisionSummary(third.id(), "digest-c", "alice", T2, Optional.of(T3), true),
-                new RevisionSummary(second.id(), "digest-b", "alice", T1, Optional.of(T2), false),
-                new RevisionSummary(first.id(), "digest-a", "alice", T0, Optional.of(T1), false)),
+                new RevisionSummary(third.id(), "digest-c", "alice", T2, Optional.of(T3), Optional.of("third"), true),
+                new RevisionSummary(second.id(), "digest-b", "alice", T1, Optional.of(T2), Optional.of("second"), false),
+                new RevisionSummary(first.id(), "digest-a", "alice", T0, Optional.of(T1), Optional.of("first"), false)),
                 await(storage.listRevisions(10)));
     }
 
@@ -305,6 +309,50 @@ abstract class HaruhiStorageContractTest {
 
         assertEquals(List.of(third.id(), second.id(), first.id()), ids(await(storage.listRevisions(10))));
         assertEquals(List.of(third.id(), second.id()), ids(await(storage.listRevisions(2))));
+    }
+
+    @Test
+    void listingBeforeAnIdPagesThroughOlderRevisions() {
+        StoredRevision first = store("digest-a", T0);
+        StoredRevision second = store("digest-b", T1);
+        StoredRevision third = store("digest-c", T2);
+
+        List<RevisionSummary> page = await(storage.listRevisions(OptionalLong.empty(), 2));
+        assertEquals(List.of(third.id(), second.id()), ids(page));
+
+        List<RevisionSummary> next = await(storage.listRevisions(OptionalLong.of(page.getLast().id()), 2));
+        assertEquals(List.of(first.id()), ids(next));
+        assertEquals(List.of(), await(storage.listRevisions(OptionalLong.of(first.id()), 2)));
+    }
+
+    /** Newest is the highest id: a revision stored later with an earlier time still lists first. */
+    @Test
+    void revisionsListByIdNotByCreationTime() {
+        StoredRevision first = store("digest-a", T2);
+        StoredRevision second = store("digest-b", T0);
+
+        assertEquals(List.of(second.id(), first.id()), ids(await(storage.listRevisions(10))));
+    }
+
+    @Test
+    void anActivationRecordsWhoActivatedAndKeepsItOnceReplaced() {
+        StoredRevision first = store("digest-a", T0);
+        StoredRevision second = store("digest-b", T1);
+        assertEquals(Optional.empty(), first.activatedBy());
+
+        await(storage.activateRevision(first.id(), "portal:42 Mark", T1));
+        assertEquals(Optional.of("portal:42 Mark"), await(storage.activeRevision()).orElseThrow().activatedBy());
+
+        await(storage.activateRevision(second.id(), "Steve", T2));
+        assertEquals(Optional.of("portal:42 Mark"),
+                await(storage.loadRevision(first.id())).orElseThrow().activatedBy());
+        assertEquals(List.of(Optional.of("Steve"), Optional.of("portal:42 Mark")),
+                await(storage.listRevisions(10)).stream().map(RevisionSummary::activatedBy).toList());
+    }
+
+    @Test
+    void theBackendNamesItself() {
+        assertTrue(List.of("memory", "postgresql").contains(storage.backendName()), storage.backendName());
     }
 
     @Test

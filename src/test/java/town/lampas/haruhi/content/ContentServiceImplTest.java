@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonParser;
 import com.mojang.serialization.DataResult;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -14,6 +15,7 @@ import java.util.OptionalLong;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import town.lampas.haruhi.content.model.ContentBundle;
+import town.lampas.haruhi.storage.RevisionSummary;
 
 /** The service's state and listeners, without a server or storage. */
 class ContentServiceImplTest {
@@ -91,7 +93,8 @@ class ContentServiceImplTest {
         ContentServiceImpl service = new ContentServiceImpl();
         ContentBundle bundle =
                 ContentTestSupport.bundleOf(ContentTestSupport.validate(ContentTestSupport.baseBundle()));
-        service.activate(bundle, OptionalLong.of(2), Optional.of("digest-of-revision-2"));
+        service.activate(bundle, Optional.of(new RevisionSummary(2, "digest-of-revision-2", "tester", Instant.EPOCH,
+                Optional.of(Instant.EPOCH), Optional.of("tester"), true)));
         service.startupFinished();
 
         service.detach();

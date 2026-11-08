@@ -1,21 +1,36 @@
 package town.lampas.haruhi.gametest;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.CommandNode;
 import com.mojang.serialization.DataResult;
+import com.mojang.serialization.JsonOps;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,10 +40,13 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.commands.CommandSource;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.jsonrpc.api.Schema;
+import net.minecraft.server.jsonrpc.methods.DiscoveryService;
 import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.util.Util;
@@ -46,6 +64,9 @@ import town.lampas.haruhi.content.ValidatedBundle;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.content.model.DialogueGraph;
 import town.lampas.haruhi.content.model.NpcProfile;
+import town.lampas.haruhi.content.remote.ContentMethods;
+import town.lampas.haruhi.content.remote.ContentRpc;
+import town.lampas.haruhi.content.remote.RemoteContentConfig;
 import town.lampas.haruhi.storage.RevisionSummary;
 import town.lampas.haruhi.storage.StoredRevision;
 
@@ -509,6 +530,381 @@ public final class ContentGameTests {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new IllegalStateException("Could not read the seed bundle", e);
+        }
+    }
+
+    /**
+     * The environment of the Portal tests that activate content, so the activation cannot replace content that tests in
+     * another batch use.
+     */
+    private static final String PORTAL_ENVIRONMENT = "haruhi-gametest:content_portal";
+    private static final String PORTAL_TOKEN = "gametest-token-7c1e";
+    private static final Identifier PORTAL_NPC = Identifier.parse("haruhi:fixture/portal");
+    /** The fetch timeout of the Portal tests' handlers. */
+    private static final Duration FETCH_TIMEOUT = Duration.ofSeconds(10);
+    private static final long PENDING_TICK_MILLIS = 10;
+    /** At {@link #PENDING_TICK_MILLIS} a tick while a request is pending, 40 seconds: longer than the fetch timeout. */
+    private static final int PORTAL_TICKS = 4000;
+
+    /**
+     * The Portal flow through the method handlers: validate, import and activate the fixture, fetched from a Portal
+     * stand-in on a local HTTP server, then read it back with status, list and export. The validate call is sent twice
+     * with one request id, and the bundle is fetched once.
+     */
+    @GameTest(environment = PORTAL_ENVIRONMENT, maxTicks = PORTAL_TICKS)
+    public void aPortalBundleValidatesImportsAndActivatesThroughTheMethods(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        ContentServiceImpl content = content();
+        FakePortal portal = FakePortal.start();
+        ContentMethods methods = ContentMethods.create(content, portal.config(), server, FETCH_TIMEOUT);
+        byte[] bytes = fixture("content/portal_bundle.json");
+        String expectedDigest = content.validate(new String(bytes, StandardCharsets.UTF_8)).result().orElseThrow()
+                .digest();
+        UUID validate = UUID.randomUUID();
+        UUID imported = UUID.randomUUID();
+        UUID activate = UUID.randomUUID();
+        AtomicReference<JsonObject> result = new AtomicReference<>();
+        AtomicReference<Long> revision = new AtomicReference<>();
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(content.isStartupComplete(),
+                        "the startup content load has not finished"))
+                .thenExecute(() -> answered(helper, methods.validate(portal.call(validate, bytes, null)), "accepted"))
+                .thenWaitUntil(() -> finished(helper, methods, validate, result))
+                .thenExecute(() -> {
+                    JsonObject done = done(helper, result.get(), "validate");
+                    helper.assertTrue(done.get("valid").getAsBoolean(), "the fixture is not valid: " + done);
+                    helper.assertValueEqual(done.get("digest").getAsString(), expectedDigest, "validated digest");
+                    helper.assertValueEqual(done.get("problem_count").getAsInt(), 0, "problem count");
+                    helper.assertTrue(!done.has("revision"), "validate stored a revision: " + done);
+                    answered(helper, methods.validate(portal.call(validate, bytes, null)), "accepted");
+                    helper.assertValueEqual(portal.fetches(validate), 1, "fetches for one request id sent twice");
+                    answered(helper, methods.importBundle(portal.call(imported, bytes, "portal:1 Sable")), "accepted");
+                })
+                .thenWaitUntil(() -> finished(helper, methods, imported, result))
+                .thenExecute(() -> {
+                    JsonObject done = done(helper, result.get(), "import");
+                    helper.assertTrue(done.get("valid").getAsBoolean(), "the import was refused: " + done);
+                    JsonObject stored = done.getAsJsonObject("revision");
+                    helper.assertValueEqual(stored.get("digest").getAsString(), expectedDigest, "stored digest");
+                    helper.assertValueEqual(stored.get("author").getAsString(),
+                            "portal:1 Sable (request " + imported + ")", "recorded author");
+                    helper.assertTrue(!stored.get("active").getAsBoolean(), "the import activated the revision");
+                    revision.set(stored.get("id").getAsLong());
+                    JsonObject param = new JsonObject();
+                    param.addProperty("request", activate.toString());
+                    param.addProperty("revision", revision.get());
+                    param.addProperty("actor", "portal:2 Mark");
+                    answered(helper, methods.activate(param), "accepted");
+                })
+                .thenWaitUntil(() -> finished(helper, methods, activate, result))
+                .thenExecute(() -> {
+                    JsonObject done = done(helper, result.get(), "activate");
+                    JsonObject active = done.getAsJsonObject("revision");
+                    helper.assertValueEqual(active.get("id").getAsLong(), revision.get(), "activated revision");
+                    helper.assertTrue(active.get("active").getAsBoolean(), "the summary is not active: " + active);
+                    helper.assertValueEqual(active.get("activated_by").getAsString(), "portal:2 Mark", "activated by");
+                    helper.assertValueEqual(content.activeRevisionId(), OptionalLong.of(revision.get()),
+                            "active revision id");
+                    helper.assertTrue(content.active().npcs().containsKey(PORTAL_NPC),
+                            "the activated content has no " + PORTAL_NPC);
+
+                    JsonObject status = methods.status(null);
+                    helper.assertValueEqual(status.getAsJsonObject("revision").get("id").getAsLong(), revision.get(),
+                            "status revision");
+                    helper.assertValueEqual(status.get("schema").getAsInt(), ContentBundle.SCHEMA, "status schema");
+                    helper.assertTrue(status.getAsJsonObject("remote").get("enabled").getAsBoolean(),
+                            "status says remote content is off");
+
+                    JsonObject list = methods.list(null);
+                    helper.assertTrue(list.getAsJsonArray("revisions").asList().stream()
+                                    .map(JsonElement::getAsJsonObject)
+                                    .anyMatch(entry -> entry.get("id").getAsLong() == revision.get()
+                                            && entry.get("active").getAsBoolean()
+                                            && entry.get("activated_by").getAsString().equals("portal:2 Mark")),
+                            "list does not show the activated revision: " + list);
+
+                    StringBuilder text = new StringBuilder();
+                    JsonObject chunk;
+                    long offset = 0;
+                    do {
+                        JsonObject param = new JsonObject();
+                        param.addProperty("revision", revision.get());
+                        param.addProperty("offset", offset);
+                        chunk = methods.export(param);
+                        helper.assertValueEqual(chunk.get("status").getAsString(), "ok", "export status " + chunk);
+                        text.append(chunk.get("text").getAsString());
+                        offset = chunk.has("next") ? chunk.get("next").getAsLong() : -1;
+                    } while (offset >= 0);
+                    helper.assertValueEqual(sha256(text.toString().getBytes(StandardCharsets.UTF_8)), expectedDigest,
+                            "SHA-256 of the exported text");
+                })
+                .thenExecute(() -> {
+                    methods.close();
+                    portal.close();
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A refused bundle through the method handlers: validate and import both finish with every problem and store
+     * nothing, a wrong token fails the fetch, and activating a revision that does not exist fails.
+     */
+    @GameTest(maxTicks = PORTAL_TICKS)
+    public void aRefusedPortalBundleListsItsProblemsAndStoresNothing(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        ContentServiceImpl content = content();
+        FakePortal portal = FakePortal.start();
+        ContentMethods methods = ContentMethods.create(content, portal.config(), server, FETCH_TIMEOUT);
+        byte[] bytes = fixture("content/portal_refused.json");
+        UUID validate = UUID.randomUUID();
+        UUID imported = UUID.randomUUID();
+        UUID wrongToken = UUID.randomUUID();
+        UUID missing = UUID.randomUUID();
+        AtomicReference<JsonObject> result = new AtomicReference<>();
+        helper.startSequence()
+                .thenExecute(() -> answered(helper, methods.validate(portal.call(validate, bytes, null)), "accepted"))
+                .thenWaitUntil(() -> finished(helper, methods, validate, result))
+                .thenExecute(() -> {
+                    JsonObject done = done(helper, result.get(), "validate");
+                    helper.assertTrue(!done.get("valid").getAsBoolean(), "the refused fixture validated: " + done);
+                    List<String> problems = done.getAsJsonArray("problems").asList().stream()
+                            .map(JsonElement::getAsString).toList();
+                    helper.assertValueEqual(done.get("problem_count").getAsInt(), problems.size(), "problem count");
+                    for (String expected : List.of("haruhi:fixture/nobody", "undeclared", "orphan")) {
+                        helper.assertTrue(problems.stream().anyMatch(line -> line.contains(expected)),
+                                "no problem names " + expected + ": " + problems);
+                    }
+                    helper.assertValueEqual(problems.size(), 3, "number of problems in " + problems);
+                    helper.assertTrue(problems.stream().allMatch(line -> line.startsWith("haruhi:fixture/portal_")),
+                            "a problem is not placed in its graph: " + problems);
+                    answered(helper, methods.importBundle(portal.call(imported, bytes, "portal:1 Sable")), "accepted");
+                })
+                .thenWaitUntil(() -> finished(helper, methods, imported, result))
+                .thenExecute(() -> {
+                    JsonObject done = done(helper, result.get(), "import");
+                    helper.assertTrue(!done.get("valid").getAsBoolean(), "the refused fixture imported: " + done);
+                    helper.assertTrue(!done.has("revision"), "a refused import stored a revision: " + done);
+                    JsonObject list = methods.list(null);
+                    helper.assertTrue(list.getAsJsonArray("revisions").asList().stream()
+                                    .noneMatch(entry -> entry.getAsJsonObject().get("author").getAsString()
+                                            .contains(imported.toString())),
+                            "a revision carries the refused import's request id: " + list);
+
+                    JsonObject call = portal.call(wrongToken, bytes, null);
+                    call.addProperty("token", "not-the-token");
+                    answered(helper, methods.validate(call), "accepted");
+                    JsonObject param = new JsonObject();
+                    param.addProperty("request", missing.toString());
+                    param.addProperty("revision", Long.MAX_VALUE);
+                    param.addProperty("actor", "portal:2 Mark");
+                    answered(helper, methods.activate(param), "accepted");
+                })
+                .thenWaitUntil(() -> finished(helper, methods, wrongToken, result))
+                .thenExecute(() -> {
+                    helper.assertValueEqual(result.get().get("status").getAsString(), "failed", "wrong token status");
+                    helper.assertValueEqual(result.get().get("reason").getAsString(), "http_status",
+                            "wrong token reason");
+                })
+                .thenWaitUntil(() -> finished(helper, methods, missing, result))
+                .thenExecute(() -> {
+                    helper.assertValueEqual(result.get().get("status").getAsString(), "failed", "missing status");
+                    helper.assertValueEqual(result.get().get("reason").getAsString(), "no_such_revision",
+                            "missing revision reason");
+                    methods.close();
+                    portal.close();
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * Every method is registered for the management server, vanilla's {@code rpc.discover} still encodes with their
+     * schemas, the log mixin applies to vanilla's connection class, and calls are checked before any fetch.
+     */
+    @GameTest(maxTicks = 20)
+    public void theMethodsAreRegisteredAndCheckTheirParams(GameTestHelper helper) {
+        for (Identifier id : ContentRpc.ALL) {
+            helper.assertTrue(BuiltInRegistries.INCOMING_RPC_METHOD.containsKey(id), id + " is not registered");
+        }
+        DataResult<JsonElement> discovered = DiscoveryService.DiscoverResponse.CODEC.codec()
+                .encodeStart(JsonOps.INSTANCE, DiscoveryService.discover(Schema.getSchemaRegistry()));
+        helper.assertTrue(discovered.error().isEmpty(), "rpc.discover does not encode: "
+                + discovered.error().map(error -> error.message()).orElse(""));
+        helper.assertTrue(discovered.result().orElseThrow().toString().contains("haruhi:content/validate"),
+                "rpc.discover does not list haruhi:content/validate");
+        Class<?> connection;
+        try {
+            // Loading the class applies JsonRpcParamsLogMixin, which fails the load if its injection point is gone.
+            connection = Class.forName("net.minecraft.server.jsonrpc.Connection");
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException(e);
+        }
+        helper.assertTrue(Arrays.stream(connection.getDeclaredMethods())
+                        .anyMatch(method -> method.getName().contains("redactParams")),
+                "JsonRpcParamsLogMixin is not applied to vanilla's management connection");
+        ContentMethods off = ContentMethods.create(content(), RemoteContentConfig.DISABLED,
+                helper.getLevel().getServer());
+        JsonObject call = new JsonObject();
+        call.addProperty("request", UUID.randomUUID().toString());
+        call.addProperty("sha256", "0".repeat(64));
+        call.addProperty("size", 10);
+        call.addProperty("token", PORTAL_TOKEN);
+        answered(helper, off.validate(call), "remote_disabled");
+
+        JsonObject unknown = new JsonObject();
+        unknown.addProperty("request", UUID.randomUUID().toString());
+        answered(helper, off.request(unknown), "unknown");
+        JsonObject bad = off.request(new JsonPrimitive(PORTAL_TOKEN));
+        answered(helper, bad, "invalid");
+        helper.assertTrue(!bad.toString().contains(PORTAL_TOKEN), "an invalid answer quotes the param: " + bad);
+        JsonObject noSize = call.deepCopy();
+        noSize.remove("size");
+        JsonObject missingSize = off.importBundle(noSize);
+        answered(helper, missingSize, "invalid");
+        helper.assertValueEqual(missingSize.get("field").getAsString(), "size", "the field named");
+        off.close();
+        helper.succeed();
+    }
+
+    private static void answered(GameTestHelper helper, JsonObject answer, String status) {
+        helper.assertValueEqual(answer.get("status").getAsString(), status, "answer " + answer);
+    }
+
+    /**
+     * Asserts that {@code request} is no longer pending, keeping its answer in {@code result}. The GameTest server does
+     * not wait between ticks, so a whole tick budget can pass in less time than one local HTTP fetch takes; a pending
+     * request sleeps the tick for {@link #PENDING_TICK_MILLIS}, so {@link #PORTAL_TICKS} ticks outlast
+     * {@link #FETCH_TIMEOUT} and a fetch that hangs fails the request rather than the tick budget.
+     */
+    private static void finished(
+            GameTestHelper helper, ContentMethods methods, UUID request, AtomicReference<JsonObject> result) {
+        JsonObject param = new JsonObject();
+        param.addProperty("request", request.toString());
+        JsonObject answer = methods.request(param);
+        if (answer.get("status").getAsString().equals("pending")) {
+            try {
+                Thread.sleep(PENDING_TICK_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            helper.fail("request " + request + " is still pending");
+        }
+        result.set(answer);
+    }
+
+    private static JsonObject done(GameTestHelper helper, JsonObject answer, String kind) {
+        helper.assertValueEqual(answer.get("status").getAsString(), "done", kind + " answer " + answer);
+        helper.assertValueEqual(answer.get("kind").getAsString(), kind, "request kind");
+        return answer;
+    }
+
+    private static byte[] fixture(String name) {
+        try (InputStream in = ContentGameTests.class.getResourceAsStream("/haruhi/fixtures/" + name)) {
+            if (in == null) {
+                throw new IllegalStateException("The GameTest jar has no fixture " + name);
+            }
+            return in.readAllBytes();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * A stand-in for the Portal's bundle route: serves the bytes registered for a request id to the bearer token, 401
+     * to any other token and 404 for an unknown id. Its threads are daemons, so a failed test that never closes it does
+     * not keep the GameTest server alive.
+     */
+    private static final class FakePortal implements AutoCloseable {
+        private static final String PREFIX = "/api/v1/haruhi/requests/";
+        private final HttpServer server;
+        private final Map<UUID, byte[]> bundles = new ConcurrentHashMap<>();
+        private final Map<UUID, Integer> fetches = new ConcurrentHashMap<>();
+
+        private FakePortal(HttpServer server) {
+            this.server = server;
+            server.createContext("/", exchange -> {
+                try {
+                    handle(exchange);
+                } catch (RuntimeException e) {
+                    Haruhi.LOGGER.error("The GameTest Portal could not answer {}", exchange.getRequestURI(), e);
+                    exchange.sendResponseHeaders(500, -1);
+                    exchange.close();
+                }
+            });
+        }
+
+        static FakePortal start() {
+            try {
+                FakePortal portal = new FakePortal(HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0));
+                // The server's dispatcher thread takes the daemon flag of the thread that starts it.
+                Thread starter = new Thread(portal.server::start, "haruhi-gametest-portal");
+                starter.setDaemon(true);
+                starter.start();
+                starter.join();
+                return portal;
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+        }
+
+        RemoteContentConfig config() {
+            return new RemoteContentConfig(true, Optional.of("http://127.0.0.1:" + server.getAddress().getPort()),
+                    RemoteContentConfig.DEFAULT_MAX_BYTES);
+        }
+
+        /** Registers {@code bytes} for {@code request} and returns a validate or import call for them. */
+        JsonObject call(UUID request, byte[] bytes, String author) {
+            bundles.put(request, bytes);
+            JsonObject call = new JsonObject();
+            call.addProperty("request", request.toString());
+            call.addProperty("sha256", sha256(bytes));
+            call.addProperty("size", bytes.length);
+            call.addProperty("token", PORTAL_TOKEN);
+            if (author != null) {
+                call.addProperty("author", author);
+            }
+            return call;
+        }
+
+        int fetches(UUID request) {
+            return fetches.getOrDefault(request, 0);
+        }
+
+        private void handle(HttpExchange exchange) throws IOException {
+            String path = exchange.getRequestURI().getRawPath();
+            byte[] body = null;
+            int status = 404;
+            if (path.startsWith(PREFIX) && path.endsWith("/bundle")) {
+                UUID request = UUID.fromString(path.substring(PREFIX.length(), path.length() - "/bundle".length()));
+                fetches.merge(request, 1, Integer::sum);
+                if (!("Bearer " + PORTAL_TOKEN).equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                    status = 401;
+                } else if (bundles.containsKey(request)) {
+                    status = 200;
+                    body = bundles.get(request);
+                }
+            }
+            exchange.sendResponseHeaders(status, body == null ? -1 : body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                if (body != null) {
+                    out.write(body);
+                }
+            }
+        }
+
+        @Override
+        public void close() {
+            server.stop(0);
         }
     }
 }

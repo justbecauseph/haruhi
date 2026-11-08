@@ -1,5 +1,7 @@
 package town.lampas.haruhi.content.api;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,5 +30,10 @@ public final class ContentExtensions {
 
     public static Optional<Registered<?>> get(Identifier id) {
         return Optional.ofNullable(EXTENSIONS.get(id));
+    }
+
+    /** The ids registered so far, sorted by their text. */
+    public static List<Identifier> ids() {
+        return EXTENSIONS.keySet().stream().sorted(Comparator.comparing(Identifier::toString)).toList();
     }
 }

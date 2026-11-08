@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -34,7 +35,8 @@ final class PostgresStorage implements HaruhiStorage {
      */
     private static final int SOCKET_TIMEOUT_SECONDS = 10;
     private static final String LOCK_ACTIVATIONS = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
-    private static final String REVISION_COLUMNS = "id, digest, bundle, author, created_at, activated_at, active";
+    private static final String REVISION_COLUMNS =
+            "id, digest, bundle, author, created_at, activated_at, activated_by, active";
     private static final String SELECT_REVISION_BY_ID =
             "SELECT " + REVISION_COLUMNS + " FROM content_revision WHERE id = ?";
     private static final String SELECT_REVISION_BY_DIGEST =
@@ -62,8 +64,8 @@ final class PostgresStorage implements HaruhiStorage {
     private static final String ACTIVATE =
             "UPDATE content_revision SET active = true, activated_at = ?, activated_by = ? WHERE id = ?";
     private static final String LIST_REVISIONS = """
-            SELECT id, digest, author, created_at, activated_at, active FROM content_revision
-            ORDER BY created_at DESC, id DESC LIMIT ?
+            SELECT id, digest, author, created_at, activated_at, activated_by, active FROM content_revision
+            WHERE id < ? ORDER BY id DESC LIMIT ?
             """;
 
     private final String schema;
@@ -278,23 +280,31 @@ final class PostgresStorage implements HaruhiStorage {
     }
 
     @Override
-    public CompletableFuture<List<RevisionSummary>> listRevisions(int limit) {
+    public CompletableFuture<List<RevisionSummary>> listRevisions(OptionalLong before, int limit) {
         if (limit < 1) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("limit must be positive, was " + limit));
         }
+        long below = before.orElse(Long.MAX_VALUE);
         return query(connection -> {
             List<RevisionSummary> listing = new ArrayList<>();
             try (PreparedStatement statement = connection.prepareStatement(LIST_REVISIONS)) {
-                statement.setInt(1, limit);
+                statement.setLong(1, below);
+                statement.setInt(2, limit);
                 try (ResultSet rows = statement.executeQuery()) {
                     while (rows.next()) {
                         listing.add(new RevisionSummary(rows.getLong(1), rows.getString(2), rows.getString(3),
-                                instant(rows, 4), activatedAt(rows, 5), rows.getBoolean(6)));
+                                instant(rows, 4), activatedAt(rows, 5), Optional.ofNullable(rows.getString(6)),
+                                rows.getBoolean(7)));
                     }
                 }
             }
             return List.copyOf(listing);
         });
+    }
+
+    @Override
+    public String backendName() {
+        return "postgresql";
     }
 
     @Override
@@ -354,7 +364,8 @@ final class PostgresStorage implements HaruhiStorage {
                     rows.getString(4),
                     instant(rows, 5),
                     activatedAt(rows, 6),
-                    rows.getBoolean(7)));
+                    Optional.ofNullable(rows.getString(7)),
+                    rows.getBoolean(8)));
         }
     }
 

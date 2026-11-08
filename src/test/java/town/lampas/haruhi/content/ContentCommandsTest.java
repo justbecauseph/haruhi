@@ -89,6 +89,7 @@ class ContentCommandsTest {
 
     private static StoredRevision stored(long id, boolean active) {
         return new StoredRevision(id, DIGEST, "{}", "tester", Instant.EPOCH,
-                active ? Optional.of(Instant.EPOCH) : Optional.empty(), active);
+                active ? Optional.of(Instant.EPOCH) : Optional.empty(),
+                active ? Optional.of("tester") : Optional.empty(), active);
     }
 }

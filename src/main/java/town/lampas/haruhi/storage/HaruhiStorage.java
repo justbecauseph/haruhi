@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -45,8 +46,26 @@ public interface HaruhiStorage extends AutoCloseable {
     /** Marks one stored revision active and every other one inactive, recording who did it and when. */
     CompletableFuture<Void> activateRevision(long revisionId, String actor, Instant at);
 
-    /** The newest revisions first. */
-    CompletableFuture<List<RevisionSummary>> listRevisions(int limit);
+    /**
+     * The newest revisions first, at most {@code limit} of them. Newest means the highest id: ids grow with each
+     * revision stored.
+     *
+     * @param before when present, only revisions with an id below it, so the last id of one page is the cursor of the
+     *         next
+     * @return a future that fails with {@link IllegalArgumentException} when {@code limit} is below 1
+     */
+    CompletableFuture<List<RevisionSummary>> listRevisions(OptionalLong before, int limit);
+
+    /** The newest revisions first, at most {@code limit} of them, as {@link #listRevisions(OptionalLong, int)}. */
+    default CompletableFuture<List<RevisionSummary>> listRevisions(int limit) {
+        return listRevisions(OptionalLong.empty(), limit);
+    }
+
+    /**
+     * The backend's name, for status reports: {@code memory} or {@code postgresql} for the two that ship. Another
+     * implementation names itself.
+     */
+    String backendName();
 
     @Override
     void close();
