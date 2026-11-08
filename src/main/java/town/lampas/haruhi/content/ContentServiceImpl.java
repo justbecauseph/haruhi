@@ -45,8 +45,7 @@ public final class ContentServiceImpl implements ContentService {
     private final Clock clock;
     private final AtomicReference<Instant> lastStamp = new AtomicReference<>(Instant.MIN);
     private volatile ContentBundle active = ContentBundle.EMPTY;
-    private volatile OptionalLong revisionId = OptionalLong.empty();
-    private volatile Optional<String> digest = Optional.empty();
+    private volatile Optional<RevisionSummary> activeRevision = Optional.empty();
     private volatile boolean startupComplete;
     private final List<Consumer<ContentBundle>> listeners = new CopyOnWriteArrayList<>();
     private final ActivationQueue activations = new ActivationQueue();
@@ -72,12 +71,22 @@ public final class ContentServiceImpl implements ContentService {
 
     @Override
     public OptionalLong activeRevisionId() {
-        return revisionId;
+        Optional<RevisionSummary> current = activeRevision;
+        return current.isPresent() ? OptionalLong.of(current.get().id()) : OptionalLong.empty();
     }
 
     /** The digest of the active stored revision; empty before any is active and after {@link #activateUnstored}. */
     public Optional<String> activeDigest() {
-        return digest;
+        return activeRevision.map(RevisionSummary::digest);
+    }
+
+    /**
+     * The active stored revision as it was when this server activated it: its activation by this server, or for the
+     * revision the startup found active, the activation storage recorded. Empty before any is active and after
+     * {@link #activateUnstored}. Safe to read from any thread.
+     */
+    public Optional<RevisionSummary> activeRevision() {
+        return activeRevision;
     }
 
     @Override
@@ -97,7 +106,7 @@ public final class ContentServiceImpl implements ContentService {
 
     @Override
     public void activateUnstored(ContentBundle bundle) {
-        activate(Objects.requireNonNull(bundle), OptionalLong.empty(), Optional.empty());
+        activate(Objects.requireNonNull(bundle), Optional.empty());
     }
 
     /**
@@ -117,7 +126,8 @@ public final class ContentServiceImpl implements ContentService {
 
     /**
      * Loads, validates and activates a stored revision, and records {@code actor} as the activator. A revision that no
-     * longer validates is refused and stays inactive. Starts once every activation, rollback and startup load
+     * longer validates is refused with a {@link ContentRefusedException} and stays inactive; an id that names no
+     * revision fails with an {@link IllegalArgumentException}. Starts once every activation, rollback and startup load
      * requested before it has finished.
      */
     public CompletableFuture<StoredRevision> activateRevision(long id, String actor) {
@@ -163,8 +173,7 @@ public final class ContentServiceImpl implements ContentService {
     void detach() {
         this.attached = null;
         this.active = ContentBundle.EMPTY;
-        this.revisionId = OptionalLong.empty();
-        this.digest = Optional.empty();
+        this.activeRevision = Optional.empty();
         this.startupComplete = false;
         activations.reset();
     }
@@ -189,12 +198,12 @@ public final class ContentServiceImpl implements ContentService {
     }
 
     /** The storage revisions are read from and written to. */
-    HaruhiStorage storage() {
+    public HaruhiStorage storage() {
         return storage.get();
     }
 
     /** {@code source}, completing on the server thread. */
-    <T> CompletableFuture<T> onServerThread(CompletableFuture<T> source) {
+    public <T> CompletableFuture<T> onServerThread(CompletableFuture<T> source) {
         return ServerThread.hop(requireServer(), source);
     }
 
@@ -202,10 +211,9 @@ public final class ContentServiceImpl implements ContentService {
      * Makes {@code bundle} active and tells every listener, in registration order. A listener that throws is logged and
      * the rest still run.
      */
-    void activate(ContentBundle bundle, OptionalLong id, Optional<String> activeDigest) {
+    void activate(ContentBundle bundle, Optional<RevisionSummary> revision) {
         this.active = bundle;
-        this.revisionId = id;
-        this.digest = activeDigest;
+        this.activeRevision = revision;
         for (Consumer<ContentBundle> listener : listeners) {
             try {
                 listener.accept(bundle);
@@ -230,15 +238,17 @@ public final class ContentServiceImpl implements ContentService {
             DataResult<ValidatedBundle> validated = validate(revision.bundleJson());
             if (validated.error().isPresent()) {
                 return CompletableFuture.<StoredRevision>failedFuture(
-                        new IllegalStateException(validated.error().get().message()));
+                        new ContentRefusedException(validated.error().get().message()));
             }
             ContentBundle bundle = validated.result().orElseThrow().bundle();
             Instant stamp = nextActivationStamp();
             return ServerThread.hop(thread, storage().activateRevision(id, actor, stamp))
                     .thenApply(ignored -> {
-                        activate(bundle, OptionalLong.of(id), Optional.of(revision.digest()));
-                        return new StoredRevision(revision.id(), revision.digest(), revision.bundleJson(),
-                                revision.author(), revision.createdAt(), Optional.of(stamp), true);
+                        StoredRevision activated = new StoredRevision(revision.id(), revision.digest(),
+                                revision.bundleJson(), revision.author(), revision.createdAt(), Optional.of(stamp),
+                                Optional.of(actor), true);
+                        activate(bundle, Optional.of(activated.summary()));
+                        return activated;
                     });
         });
     }

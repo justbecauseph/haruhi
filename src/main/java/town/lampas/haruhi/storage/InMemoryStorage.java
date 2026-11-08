@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -18,10 +19,8 @@ import java.util.function.Supplier;
  */
 final class InMemoryStorage implements HaruhiStorage {
     private static final int THREADS = 2;
-    private static final Comparator<StoredRevision> NEWEST_FIRST = Comparator
-            .comparing(StoredRevision::createdAt)
-            .thenComparingLong(StoredRevision::id)
-            .reversed();
+    private static final Comparator<StoredRevision> NEWEST_FIRST =
+            Comparator.comparingLong(StoredRevision::id).reversed();
 
     private final Object lock = new Object();
     private final StorageExecutor executor =
@@ -29,7 +28,6 @@ final class InMemoryStorage implements HaruhiStorage {
     private final Map<UUID, Map<FlagKey, Integer>> flags = new HashMap<>();
     private final Map<UUID, Map<VisitKey, VisitRecord>> visits = new HashMap<>();
     private final List<StoredRevision> revisions = new ArrayList<>();
-    private final Map<Long, String> activatedBy = new HashMap<>();
     private long nextRevisionId = 1;
 
     @Override
@@ -88,7 +86,7 @@ final class InMemoryStorage implements HaruhiStorage {
                 }
             }
             StoredRevision stored = new StoredRevision(
-                    nextRevisionId++, digest, bundleJson, author, stamp, Optional.empty(), false);
+                    nextRevisionId++, digest, bundleJson, author, stamp, Optional.empty(), Optional.empty(), false);
             revisions.add(stored);
             return stored;
         });
@@ -112,27 +110,32 @@ final class InMemoryStorage implements HaruhiStorage {
             for (int index = 0; index < revisions.size(); index++) {
                 StoredRevision revision = revisions.get(index);
                 if (index == target) {
-                    revisions.set(index, withActivation(revision, Optional.of(stamp), true));
+                    revisions.set(index, withActivation(revision, Optional.of(stamp), Optional.of(actor), true));
                 } else if (revision.active()) {
-                    revisions.set(index, withActivation(revision, revision.activatedAt(), false));
+                    revisions.set(index,
+                            withActivation(revision, revision.activatedAt(), revision.activatedBy(), false));
                 }
             }
-            activatedBy.put(revisionId, actor);
             return null;
         });
     }
 
     @Override
-    public CompletableFuture<List<RevisionSummary>> listRevisions(int limit) {
+    public CompletableFuture<List<RevisionSummary>> listRevisions(OptionalLong before, int limit) {
         if (limit < 1) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("limit must be positive, was " + limit));
         }
         return locked(() -> revisions.stream()
+                .filter(revision -> before.isEmpty() || revision.id() < before.getAsLong())
                 .sorted(NEWEST_FIRST)
                 .limit(limit)
-                .map(revision -> new RevisionSummary(revision.id(), revision.digest(), revision.author(),
-                        revision.createdAt(), revision.activatedAt(), revision.active()))
+                .map(StoredRevision::summary)
                 .toList());
+    }
+
+    @Override
+    public String backendName() {
+        return "memory";
     }
 
     @Override
@@ -159,8 +162,8 @@ final class InMemoryStorage implements HaruhiStorage {
     }
 
     private static StoredRevision withActivation(
-            StoredRevision revision, Optional<Instant> activatedAt, boolean active) {
+            StoredRevision revision, Optional<Instant> activatedAt, Optional<String> activatedBy, boolean active) {
         return new StoredRevision(revision.id(), revision.digest(), revision.bundleJson(), revision.author(),
-                revision.createdAt(), activatedAt, active);
+                revision.createdAt(), activatedAt, activatedBy, active);
     }
 }

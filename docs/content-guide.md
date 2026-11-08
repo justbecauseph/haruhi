@@ -61,6 +61,27 @@ At server start Haruhi activates the stored active revision. When storage has no
 default in-memory storage nothing survives a restart, so a revision you activated by command is gone after one; see
 the [server guide](server-guide.md) for PostgreSQL storage.
 
+### From the Portal
+
+On a server with [remote content](server-guide.md#remote-content-from-the-portal) on, the Lampas Portal's content
+editor does steps 1 to 4 without files or commands. It talks to the server over the management connection, and the
+server fetches each bundle from the Portal, so the bundle's size is not limited by a management message.
+
+- **Send for review** runs the server's check, `haruhi:content/validate`: the same validation as `/haruhi content
+  validate`, with every registered condition, action, provider and extension. Nothing is stored. The Portal shows each
+  problem at its place, from the `<where>` part of Haruhi's `<where>: <problem>` (the forms are in
+  [Validation](#validation)). A refused bundle lists its first 500 problems and the total.
+- **Put live**, for admins, checks again, then imports the bundle with `haruhi:content/import`, which stores a revision
+  with the writer as author, and activates it with `haruhi:content/activate`, with the admin as the activator. Content
+  that is already stored returns the existing revision, so sending the same bundle twice stores one revision.
+- **Versions** are Haruhi's revision ids. Going back to a version activates that revision by id; the Portal never
+  sends `/haruhi content rollback`, which flips between the last two activated revisions.
+- What reaches players is the same as for an activation by command: new conversations use the new revision and open
+  ones finish on theirs ([what an activation reaches](server-guide.md#what-an-activation-reaches)).
+
+Placing the content in the world stays in-game: the Portal writes the `/haruhi npc spawn` and `/haruhi bind` commands
+for someone to run. It lists the bindings and NPCs the server has through `haruhi:content/bindings`.
+
 ## The bundle file
 
 A bundle is one JSON object:

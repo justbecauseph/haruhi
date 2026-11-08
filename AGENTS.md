@@ -5,7 +5,9 @@ Haruhi is a Fabric 26.2 mod for scriptable NPCs:
 - a visual-novel dialogue screen, with vanilla dialogs as the fallback for a client without Haruhi's dialogue channel;
 - NPCs rendered with Blockbench models through GeckoLib;
 - conversations bound to placed blocks and to existing entities that are not Haruhi NPCs;
-- per-character dialogue flags and visit counts.
+- per-character dialogue flags and visit counts;
+- management methods through which the Lampas Portal validates, stores and activates content, with the server fetching
+  each bundle from the Portal.
 
 In practice every client needs Haruhi: the `haruhi:npc` entity type is a synced registry entry, so Fabric API's registry
 sync disconnects a client that lacks it before it joins, and the vanilla dialog fallback is not reached by a normal
@@ -49,9 +51,9 @@ The Guild itself is a later consumer and is not in this repository.
 | Component | Package and resources | Delivers | Depends on |
 |---|---|---|---|
 | storage | `town.lampas.haruhi.storage` (except the contract files below), `src/main/resources/haruhi/migrations/` | `StorageModule`, config `config/haruhi.json`, in-memory and PostgreSQL (`HikariCP`, versioned SQL migrations) implementations of `HaruhiStorage` | nothing |
-| content | `town.lampas.haruhi.content` (except the contract files), `src/main/resources/haruhi/seed_bundle.json` | `ContentModule`: JSON codecs for the bundle format below, full validation, SHA-256 digest, revisions through `HaruhiStorage`, activation on startup, `/haruhi content` commands | storage (interface), `DialogueRegistries` for parsing specs |
+| content | `town.lampas.haruhi.content` (except the contract files) and `content.remote`, `src/main/resources/haruhi/seed_bundle.json` | `ContentModule`: JSON codecs for the bundle format below, full validation, SHA-256 digest, revisions through `HaruhiStorage`, activation on startup, `/haruhi content` commands, the `haruhi:content/*` management methods and the Portal fetch (config `config/haruhi-content.json`; see Management methods below) | storage (interface), `DialogueRegistries` for parsing specs; binding (`BindingService`) and npc (`NpcControl`) at use time, for `haruhi:content/bindings` |
 | dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` | `DialogueModule`: sessions (tied to an NPC or, through `openAt`, to a place, with an optional `DialogueSpeaker` for nodes that name no speaker), graph runtime, node text resolved for the player when sent, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
-| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings in per-dimension saved data (`BlockBindings`, `<dimension>/data/haruhi/block_bindings.dat`), entity bindings as the persistent Fabric attachment `haruhi:binding` (`EntityBindings`), the server-side `UseBlockCallback` and `UseEntityCallback` that open a bound graph in place of the vanilla interaction, the `PlayerBlockBreakEvents` listeners that drop a broken block's binding (noted before the break, removed once the block is gone, at the latest at the end of the tick), `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings` | content (`ContentService`), dialogue (`DialogueService`), npc (`NpcControl`) |
+| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings in per-dimension saved data (`BlockBindings`, `<dimension>/data/haruhi/block_bindings.dat`), entity bindings as the persistent Fabric attachment `haruhi:binding` (`EntityBindings`), the server-side `UseBlockCallback` and `UseEntityCallback` that open a bound graph in place of the vanilla interaction, the `PlayerBlockBreakEvents` listeners that drop a broken block's binding (noted before the break, removed once the block is gone, at the latest at the end of the tick), `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings`, and the read-only `BindingService` (`HaruhiServices.bindings()`) that lists the same bindings with the same problems | content (`ContentService`), dialogue (`DialogueService`), npc (`NpcControl`) |
 | npc and client | `town.lampas.haruhi.npc` (except `NpcControl`), `town.lampas.haruhi.client` (except `HaruhiClient`), `assets/haruhi/**` | `NpcModule`: entity type, profile and look syncing, interaction, `/haruhi npc` commands, `NpcControl`. `NpcClient`: GeckoLib replaced-entity renderer, vanilla player-model fallback, default humanoid model and animations, animation payload receiver. `DialogueClient`: the visual-novel screen; while it is open, `DialogueHud` hides the vanilla HUD elements under its box (hotbar, status bars, experience bar and level, held-item name, crosshair) and moves the chat above the box | content (`ContentService`), dialogue (`DialogueService`), the payloads |
 
 Initialisation order, in `Haruhi.onInitialize`: payload types, storage, content, dialogue, npc, binding. A module may
@@ -67,7 +69,7 @@ with the reason, in your final message.
 - `storage/HaruhiStorage.java`, `FlagKey`, `FlagChange`, `VisitKey`, `VisitRecord`, `StoredRevision`, `RevisionSummary`
 - `content/ContentService.java`, `content/model/*`, `content/api/*`
 - `dialogue/api/*`
-- `npc/NpcControl.java`
+- `npc/NpcControl.java`, `binding/BindingService.java`
 - `network/*` (payload records and `HaruhiNetworking`)
 - `build.gradle`, `gradle.properties`, `settings.gradle`, `.github/workflows/release.yml`, `src/main/resources/fabric.mod.json`, both mixin configs, `src/gametest/resources/fabric.mod.json`, `src/test/java/town/lampas/haruhi/ArchitectureTest.java`
 
@@ -87,7 +89,8 @@ Each component writes its GameTests in its own class, already listed in the Game
 - **Lang file:** only the npc and client component edits `assets/haruhi/lang/en_us.json`. Other components use
   `Component.literal` for command feedback.
 - **Configuration:** storage owns `config/haruhi.json`. Dialogue owns `config/haruhi-dialogue.json`, which holds the
-  command-action allowlist.
+  command-action allowlist. Content owns `config/haruhi-content.json`, which turns the Portal fetch on and names its
+  origin and size limit.
 
 ## Content bundle format
 
@@ -248,6 +251,37 @@ blocks and entities" in `docs/content-guide.md`, are the user-facing reference; 
   conversion (`MOB_CONVERSION`, before vanilla discards the old mob) or an unload whose removal reason destroys the
   entity. Each takes the binding off as it logs, so a later event for the same entity finds none. An unload that does
   not destroy the entity (a chunk unload, a dimension change, whose new entity keeps the binding) logs nothing.
+
+## Management methods
+
+The content component registers `haruhi:content/status`, `list`, `validate`, `import`, `activate`, `request`, `export`
+and `bindings` on Minecraft's management protocol (`content.remote.ContentRpc`), for the Lampas Portal's content editor
+([plan](https://github.com/justbecauseph/lampas-two-kb/blob/main/docs/plan/CONTENT-EDITOR-PLAN.md) §6 and §9). The
+"Remote content from the Portal" section of `docs/server-guide.md` is the reference for their fields and answers, and
+"From the Portal" in `docs/content-guide.md` the writer-facing summary; keep both in step.
+
+- **Params.** One param per method, an object, sent as `"params": [{...}]` or `"params": {"params": {...}}`, decoded as
+  any JSON (`ExtraCodecs.JSON`) and checked by `Params`: vanilla logs a param that fails to decode together with the
+  call, which would log a token. A bad field is answered `invalid` with its name, never its value. Every answer is an
+  object with a `status`. Vanilla refuses a wrong envelope itself and logs it at DEBUG with the params;
+  `mixin/JsonRpcParamsLogMixin` (owned by content) replaces the params of a `haruhi:` call in that line.
+- **Threads.** `list` and `export` run `notOnMainThread()` and wait for storage up to 3 seconds; the others run on the
+  server thread and return at once.
+- **Requests.** `validate`, `import` and `activate` take a request id (UUID), start the work and answer `accepted`;
+  `request` reads `pending`, `done`, `failed` or `unknown`. `ContentRequests` holds them: the same id with the same
+  fields returns the held request (a failure included), another call under it is `conflict`, results are kept 15 minutes
+  after they finish, at most 8 run and 512 are held (`busy` beyond). Problem lists carry the first 500 lines, each cut
+  to 1000 characters, and `problem_count`.
+- **Fetch.** Only when `remote.enabled` is true (default false). `BundleFetcher` builds
+  `<remote.origin>/api/v1/haruhi/requests/<request>/bundle`, takes no URL from a call, sends the call's token as a
+  bearer, follows no redirect, and checks the body's size (against the call's `size`, at most `remote.max_bytes`,
+  default 4 MiB), SHA-256 and UTF-8 before validation. The origin must be `https`, or `http` on a loopback host. The
+  token is never logged or kept.
+- **Import** records the author as `<author> (request <id>)`. **Activate** goes through
+  `ContentServiceImpl.activateRevision`, so it queues with command activations; a revision that no longer validates
+  fails with `ContentRefusedException` and is answered `done` with `valid` false and its problems.
+- **Status** reads the live revision's summary that `ContentServiceImpl.activeRevision()` keeps from its activation, so
+  it needs no storage read.
 
 ## Blockbench model converter
 

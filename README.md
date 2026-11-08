@@ -14,6 +14,9 @@ Each player's dialogue flags and visit counts are stored in memory or in Postgre
   lists every problem it finds, one per line.
 - `/haruhi content` imports, validates, activates and rolls back bundles while the server runs. Each revision is
   stored with the SHA-256 digest of its canonical JSON.
+- The Lampas Portal can validate, import and activate bundles through `haruhi:content/*` methods on Minecraft's
+  management connection, with the server fetching each bundle from the Portal over HTTPS. It is off until
+  `config/haruhi-content.json` turns it on.
 - The visual-novel screen types out the text, shows a portrait or a 3D headshot of the speaker, and takes choices by
   click or the number keys 1 to 9. While it is open, most HUD elements under the text box are hidden and the chat
   moves above it.

@@ -19,10 +19,10 @@ guide](content-guide.md), and the model pipeline in [models and animations](mode
 | Module | Package | Delivers | Uses |
 |---|---|---|---|
 | storage | `town.lampas.haruhi.storage` | `StorageModule`: reads `config/haruhi.json`, builds `InMemoryStorage` or `PostgresStorage`, runs the SQL migrations | nothing |
-| content | `town.lampas.haruhi.content`, `content.model` | `ContentModule`: bundle parsing and validation, canonical JSON and SHA-256 digest, revisions, the startup load, `/haruhi content` | storage, `DialogueRegistries` |
+| content | `town.lampas.haruhi.content`, `content.model`, `content.remote` | `ContentModule`: bundle parsing and validation, canonical JSON and SHA-256 digest, revisions, the startup load, `/haruhi content`, and the `haruhi:content/*` management methods with the Portal fetch (`config/haruhi-content.json`) | storage, `DialogueRegistries`; binding and npc at use time, for `haruhi:content/bindings` |
 | dialogue | `town.lampas.haruhi.dialogue` and its subpackages, `town.lampas.haruhi.mixin` | `DialogueModule`: sessions, the graph runner, the built-ins, the flag and visit cache with write-behind, payload receivers, the vanilla dialog presenter, `/haruhi dialogue` and `/haruhi flags` | content, storage, npc, network |
 | npc | `town.lampas.haruhi.npc` | `NpcModule`: the `haruhi:npc` entity type, look and profile syncing, interaction, `/haruhi npc`, `NpcControl` | content, dialogue, network |
-| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings (per-dimension saved data `BlockBindings`), entity bindings (the persistent attachment `haruhi:binding`, `EntityBindings`), the server-side use callbacks that open a bound graph in place of the vanilla interaction, the block-break listener, `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings` | content, dialogue, npc |
+| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings (per-dimension saved data `BlockBindings`), entity bindings (the persistent attachment `haruhi:binding`, `EntityBindings`), the server-side use callbacks that open a bound graph in place of the vanilla interaction, the block-break listener, `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings`, and the read-only `BindingService` | content, dialogue, npc |
 | network | `town.lampas.haruhi.network` | the payload records and `HaruhiNetworking.registerPayloadTypes` | nothing |
 | client | `town.lampas.haruhi.client` | `NpcClient`: the GeckoLib renderer, the vanilla fallback renderer, the animation receiver. `DialogueClient`: the visual-novel screen and `DialogueHud`. | network, npc entity class |
 
@@ -53,9 +53,10 @@ called before its module has initialised throws `IllegalStateException("Haruhi <
 | `storage()` | `HaruhiStorage` | `StorageModule` | asynchronous flags, visits and revisions |
 | `content()` | `ContentService` | `ContentModule` | the active bundle, activation listeners, parse and validate |
 | `dialogue()` | `DialogueService` | `DialogueModule` | open and close conversations |
-| `npc()` | `NpcControl` | `NpcModule` | is an entity an NPC, its profile id, play an animation |
+| `npc()` | `NpcControl` | `NpcModule` | is an entity an NPC, its profile id, play an animation, list the loaded NPCs |
+| `bindings()` | `BindingService` | `BindingModule` | list block bindings and bound entities with their problems, read only |
 
-`ContentService`, `DialogueService` and `NpcControl` are server-thread only.
+`ContentService`, `DialogueService`, `NpcControl` and `BindingService` are server-thread only.
 
 ### Server lifecycle
 
@@ -63,14 +64,14 @@ Listeners run in registration order, which follows the initialisation order.
 
 | Event | What runs |
 |---|---|
-| `SERVER_STARTING` | storage: rebuild the storage if a previous server closed it, run the PostgreSQL migrations (blocking). content: attach to the server. npc: remember the server. |
+| `SERVER_STARTING` | storage: rebuild the storage if a previous server closed it, run the PostgreSQL migrations (blocking). content: attach to the server and build the management method handlers for it. npc: remember the server. |
 | `SERVER_STARTED` | content: the startup load (active revision, else `config/haruhi/bundle.json`, else the seed) |
 | `ServerPlayerEvents.JOIN` | dialogue: start loading the player's flags and visits |
 | `END_SERVER_TICK` | dialogue: end sessions whose player died, whose interlocutor (an NPC or a bound entity) is gone or more than 8 blocks away, or whose player left the `openAt` anchor; retry failed loads, flush flag batches every 100 ticks; hand over waiting `haruhi:give` rewards |
 | `AFTER_RESPAWN`, `AFTER_DEATH` | dialogue: end the conversation; the new player entity takes over the cached flags |
 | `ServerPlayerEvents.LEAVE` | dialogue: drop the session and the cache, flush the player's pending flags |
 | `SERVER_STOPPING` | dialogue: drop every session, flush every batch and wait up to 10 seconds; log rewards that are still waiting |
-| `SERVER_STOPPED` | storage: close (queued work gets a 10-second grace). content: back to the empty bundle. npc: forget the server. |
+| `SERVER_STOPPED` | storage: close (queued work gets a 10-second grace). content: forget the management requests, stop the Portal fetcher, back to the empty bundle. npc: forget the server. |
 | `ServerLevelEvents.LOAD` | binding: read the dimension's block bindings |
 | `UseBlockCallback`, `UseEntityCallback` | binding: a bound block or entity opens its graph and the vanilla interaction is skipped (see the [server guide](server-guide.md#binding-behaviour)) |
 | `UseItemCallback` | binding: refuse the held item's use in the tick a binding consumed a use and the next |
@@ -93,7 +94,12 @@ next start begins clean.
   run.
 - One player's storage operations run in order through `OrderedWrites`, so a load never overtakes a write submitted
   before it.
-- Activations, rollbacks and the startup load run one at a time through `ActivationQueue`.
+- Activations, rollbacks and the startup load run one at a time through `ActivationQueue`, and so do activations through
+  `haruhi:content/activate`.
+- Management methods run on the server thread, where vanilla's management server waits for them, except
+  `haruhi:content/list` and `export`: they run on the management connection's thread and wait for storage up to 3
+  seconds there. The Portal fetch runs on the HTTP client's threads and hops back to the server thread to validate and
+  store.
 
 ### Client and server split
 

@@ -7,7 +7,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -147,8 +146,7 @@ final class ContentStartup {
         return switch (choice) {
             case Choice.Stored stored -> {
                 StoredRevision revision = stored.revision();
-                service.activate(stored.validated().bundle(), OptionalLong.of(revision.id()),
-                        Optional.of(revision.digest()));
+                service.activate(stored.validated().bundle(), Optional.of(revision.summary()));
                 Haruhi.LOGGER.info("Activated content revision {}", revision.id());
                 yield CompletableFuture.completedFuture(null);
             }

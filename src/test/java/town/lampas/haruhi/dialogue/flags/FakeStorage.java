@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import town.lampas.haruhi.storage.FlagChange;
@@ -112,8 +113,13 @@ final class FakeStorage implements HaruhiStorage {
     }
 
     @Override
-    public CompletableFuture<List<RevisionSummary>> listRevisions(int limit) {
+    public CompletableFuture<List<RevisionSummary>> listRevisions(OptionalLong before, int limit) {
         return unsupported();
+    }
+
+    @Override
+    public String backendName() {
+        return "fake";
     }
 
     @Override

@@ -9,6 +9,7 @@ guide](content-guide.md); models and textures are in [models and animations](mod
 - [Storage configuration](#storage-configuration)
 - [PostgreSQL setup and migrations](#postgresql-setup-and-migrations)
 - [Command actions configuration](#command-actions-configuration)
+- [Remote content from the Portal](#remote-content-from-the-portal)
 - [Client configuration](#client-configuration)
 - [Content at startup](#content-at-startup)
 - [Commands](#commands)
@@ -80,13 +81,14 @@ again when the next world starts.
 
 ## Configuration files
 
-The three JSON configuration files are read once, the server-side ones when the mod initialises and the client one when
+The four JSON configuration files are read once, the server-side ones when the mod initialises and the client one when
 the client starts. Restart to apply a change.
 
 | File | Side | Read | Created when missing |
 |---|---|---|---|
 | `config/haruhi.json` | server | at mod initialisation | yes, with the defaults |
 | `config/haruhi-dialogue.json` | server | at mod initialisation | yes, with the defaults |
+| `config/haruhi-content.json` | server | at mod initialisation | yes, with remote content off |
 | `config/haruhi-client.json` | client | at client initialisation | yes, with the defaults |
 | `config/haruhi/bundle.json` | server | at server start, only when no stored revision is active | no |
 | `config/haruhi/bundles/` | server | by `/haruhi content import` and `validate` | no; create the folder yourself |
@@ -251,6 +253,128 @@ Example, to let bundles run `give` and `tellraw` at game-master level:
   "command_allowlist": ["give", "tellraw"]
 }
 ```
+
+## Remote content from the Portal
+
+The Lampas Portal's content editor validates, stores and activates content through `haruhi:content/*` methods on
+Minecraft's management protocol, the JSON-RPC WebSocket the Portal already holds. A management message holds at most
+64 KiB, so a bundle never travels in a call: for validate and import the server fetches the bundle from the Portal over
+HTTPS. `config/haruhi-content.json` controls that fetch. The file written on first start:
+
+```json
+{
+  "remote": {
+    "enabled": false,
+    "origin": "",
+    "max_bytes": 4194304
+  }
+}
+```
+
+| Key | Default | Rule |
+|---|---|---|
+| `remote.enabled` | `false` | when false, `validate` and `import` answer `remote_disabled`; the other methods work whenever the management server runs |
+| `remote.origin` | `""` | the Portal's scheme, host and optional port, nothing else; required when `enabled` is true. It must be `https`, except that `http` is allowed for `localhost`, `127.0.0.1` and `[::1]` |
+| `remote.max_bytes` | `4194304` (4 MiB) | the largest bundle a call may name, from 1 to 67108864 (64 MiB) |
+
+- The server builds the bundle URL from the origin and the request id, `<origin>/api/v1/haruhi/requests/<request>/bundle`,
+  and never takes a URL from a call, so a call cannot point the fetch at another host.
+- Unknown keys are refused. A file that cannot be read or does not validate is logged at `ERROR` as
+  `Haruhi content configuration <path> is invalid: <problem>; remote content is disabled`, and the server starts with
+  remote content off.
+- The file is read once, at mod initialisation. Restart to apply a change.
+
+### Enabling it
+
+1. The management server must be on in `server.properties` and reachable by the Portal: `management-server-enabled`,
+   `management-server-host`, `management-server-port`, `management-server-secret` and the TLS keys. The Portal's own
+   README covers these; Haruhi reads none of them.
+2. Allow HTTPS from the server host to the Portal origin. From the host, as the server's user:
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' https://dev.lampas.town/
+   ```
+
+   Any HTTP status means the host can reach the Portal; a timeout or a DNS error means the egress is blocked.
+3. Set `remote.enabled` to `true` and `remote.origin` to the Portal origin, for play.lampas.town
+   `"origin": "https://dev.lampas.town"`.
+4. Restart. The log shows `Haruhi remote content: fetching bundles from https://dev.lampas.town, at most 4194304
+   bytes`, and `haruhi:content/status` answers `"remote": {"enabled": true, ...}`.
+
+With in-memory storage, revisions stored through the Portal are lost at the next restart, as any revision is; use
+[PostgreSQL storage](#postgresql-backend) on a server the Portal manages.
+
+### What the fetch does
+
+- One `GET` per request, with the call's token as `Authorization: Bearer <token>`. It never follows a redirect, so the
+  token goes to the configured origin only. The connection times out after 10 seconds, the whole fetch after 60.
+- The body is refused as soon as it passes the `size` the call named, and its size, SHA-256 and UTF-8 are checked
+  against the call before anything parses it. Then it is validated as `/haruhi content validate` validates a file.
+- The token is not logged and is not kept after the fetch. Each method decodes its param as any JSON and checks the
+  fields itself, so a malformed field is answered with `invalid` without quoting it. A call that does not fit the
+  envelope below is refused by vanilla, which logs it at `DEBUG` with its params, and Fabric writes `DEBUG` to
+  `logs/debug.log`; Haruhi replaces the params of a `haruhi:` call in that line, so the token does not reach the file.
+- The fetched bundle is validated on the server thread, as `/haruhi content validate` validates a file of the same
+  size, and up to 8 requests may run. Keep `remote.max_bytes` at the size the Portal sends, 4 MiB by default.
+
+### Management methods
+
+Each method takes one param, an object with the fields below (unknown fields are ignored), and answers an object with
+a `status` at once. Send it by position, `"params": [{...}]`, or by name, `"params": {"params": {...}}`; `status`
+takes `[{}]`. Vanilla refuses any other envelope (no `params`, the fields themselves as `params`, or an array of other
+than one element) with a JSON-RPC invalid-params error, and refuses every call with a JSON-RPC error before the
+server has initialised; between then and the server's start, Haruhi's methods answer `unavailable`. `list` and
+`export` read storage and wait for it up to 3 seconds, off the server thread; the others run on the server thread, as
+vanilla runs management methods.
+
+| Method | Param fields | Answer |
+|---|---|---|
+| `haruhi:content/status` | none | `ok` with `revision` (the live revision's summary, absent when none is stored and live), `storage` (`memory` or `postgresql`), `haruhi_version`, `schema` (the bundle schema this build reads), `extensions` (the registered extension ids), `remote` (`enabled`, `origin`, `max_bytes`) and `startup_complete` |
+| `haruhi:content/list` | `before` (a revision id, optional), `limit` (default 20, at most 100) | `ok` with `revisions`, newest first (highest id first), and `next` when more follow: pass it as `before` for the next page |
+| `haruhi:content/validate` | `request` (a UUID), `sha256` (64 hex digits), `size` (bytes), `token` | `accepted`; the result through `request` |
+| `haruhi:content/import` | as `validate`, plus `author` | `accepted`; the result through `request` |
+| `haruhi:content/activate` | `request`, `revision`, `actor` | `accepted`; the result through `request` |
+| `haruhi:content/request` | `request` | `pending`, `done` with the result, `failed` with `reason` and `message`, or `unknown`; each with the request's `kind` |
+| `haruhi:content/export` | `revision`, `offset` (default 0) | `ok` with up to 48 KiB (UTF-8) of the stored bundle text from `offset` as `text`, the text's `total` length, its `digest`, and `next` (the offset of the next part) when more follow. Offsets count UTF-16 code units, as JavaScript indexes strings, and a part never splits a surrogate pair. `unknown_revision` for an id that is not stored |
+| `haruhi:content/bindings` | `before` (the `next` of the previous page, optional), `limit` (default 100, at most 200) | `ok` with `blocks`, `entities` and `npcs` as `/haruhi bindings all` and `/haruhi npc list` list them, each with its `problems`, and `next` when more follow |
+
+A revision summary is `id`, `digest`, `author`, `created_at`, `activated_at` and `activated_by` (both absent until it is
+first activated), and `active`; times are ISO-8601 instants. A `bindings` NPC whose profile the live content lacks has
+the problem `missing profile`, one with no profile `no profile`.
+
+Refusals that every call can get: `invalid` with the `field` and a `message` (the value is never quoted). Validate and
+import also answer `remote_disabled` and `too_large` (a `size` over `remote.max_bytes`), and validate, import and
+activate answer `conflict` (the request id is held for another call) and `busy` (8 requests run at once, or 512 are held).
+
+**Requests.** Validate, import and activate start a request and answer `accepted`. A call with a request id the server
+already holds, with the same fields, returns that request without running it again, a failure included; a retry after a
+failure takes a new id. A finished result is kept for 15 minutes after it finished; then `request` answers `unknown`.
+Results are in server memory only, so a restart forgets them.
+
+A `done` result has `valid`:
+
+- **validate:** `valid` true with `digest`, or false with `problems`.
+- **import:** as validate. A valid bundle is stored, and `revision` is its summary; content that is already stored
+  returns the existing revision. A refused bundle stores nothing. The stored `author` is the call's `author` followed by
+  ` (request <id>)`, so the Portal can find an import whose result it lost in `list`.
+- **activate:** `valid` true with `digest` and the activated `revision`, or false with the `problems` that refused it
+  (a stored revision can stop validating, for example after a command leaves the allowlist). The live content is
+  unchanged by a refusal. Activations run in order with `/haruhi content activate` and `rollback`.
+
+`problems` holds the first 500 problems, each Haruhi's `<where>: <problem>` cut to 1000 characters, and
+`problem_count` all of them. A `failed` request has a `reason`:
+
+| `reason` | Meaning |
+|---|---|
+| `fetch_failed` | the Portal could not be reached, or the connection failed during the transfer |
+| `http_status` | the Portal answered other than 200, for example 401 for an expired token |
+| `timeout` | the Portal did not send the whole bundle within 60 seconds |
+| `size_mismatch` | the body is not the size the call named |
+| `sha256_mismatch` | the body's SHA-256 is not the one the call named |
+| `not_utf8` | the body is not UTF-8 |
+| `storage_failed` | storing or activating the revision failed in storage |
+| `no_such_revision` | the activation named a revision that is not stored |
+| `internal` | anything else; the `message` says what |
 
 ## Client configuration
 
@@ -578,8 +702,8 @@ The bundle town.json links outside /srv/minecraft/config/haruhi/bundles
   lowercase hex SHA-256 of that text. Two files that differ only in key order or layout have the same digest.
 - Importing content that is already stored returns the existing revision instead of a new one. If that revision is
   active, the reply is `Revision 1 (digest 3b1f6f3a2c04) already has this content and is active.`
-- The author (who imported it), the creation time, and the latest activation time. Storage also records who last
-  activated it (the `activated_by` column in PostgreSQL); `list` does not show it.
+- The author (who imported it), the creation time, and when and by whom it was last activated. `/haruhi content list`
+  does not show who activated it; the `haruhi:content/list` and `status` management methods do.
 - Revisions cannot be changed, and no command deletes one.
 
 ### Activation and rollback
