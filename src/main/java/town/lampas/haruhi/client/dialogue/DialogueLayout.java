@@ -6,8 +6,10 @@ import java.util.function.IntUnaryOperator;
  * Where the parts of the {@link DialogueScreen} text box go, in GUI pixels. The box runs along the bottom of the screen.
  * When the screen has a headshot to show, a square frame for it sits at the box's top-left padding, and the speaker's
  * name, a divider under the name and the dialogue text form a column to the right of the frame. Without a headshot the
- * column starts at the box's left padding. The box grows with the text, but never into the room kept above it for the
- * choices. Pure arithmetic with no client classes, so it is unit tested.
+ * column starts at the box's left padding. The box grows with the text up to two fifths of the screen's height
+ * ({@link #MAX_SCREEN_PERCENT}), and never into the room kept above it for the choices. Text with more lines than that
+ * box holds is shown in pages of {@link #pageLines} lines ({@link TextPages}), and the box then fits one full page.
+ * Pure arithmetic with no client classes, so it is unit tested.
  *
  * @param frameSize the side of the headshot square, or 0 when there is no frame
  * @param textWidth the width the text wraps to, which the name and the divider span too
@@ -15,6 +17,7 @@ import java.util.function.IntUnaryOperator;
  * @param dividerY the pixel row of the one-pixel divider under the name
  * @param textY the top of the first text line
  * @param lineCount how many lines the text wrapped to at {@link #textWidth}
+ * @param pageLines how many lines the box holds, at least 1; text with more lines than this is shown in pages
  */
 record DialogueLayout(
         int boxX,
@@ -29,7 +32,8 @@ record DialogueLayout(
         int nameY,
         int dividerY,
         int textY,
-        int lineCount) {
+        int lineCount,
+        int pageLines) {
 
     /** The space between the box and the screen's left, right and bottom edges, and above the choices. */
     static final int MARGIN = 12;
@@ -39,6 +43,12 @@ record DialogueLayout(
     static final int BOTTOM_PADDING = 18;
     /** The smallest box, whatever the text. */
     static final int MIN_BOX_HEIGHT = 84;
+    /**
+     * The share of the screen's height, in percent, that the box grows to at most, so that a long text pages instead of
+     * covering the world and the speaker. The box may still be as tall as {@link #MIN_BOX_HEIGHT} and as a full headshot
+     * with its padding.
+     */
+    static final int MAX_SCREEN_PERCENT = 40;
     /** The side of the headshot square. 128 to 256 real pixels at GUI scales 2 to 4. */
     static final int HEADSHOT_SIZE = 64;
     /** A headshot squeezed smaller than this by a short screen is left out. */
@@ -71,7 +81,10 @@ record DialogueLayout(
         int boxX = MARGIN;
         int boxWidth = Math.max(0, screenWidth - 2 * MARGIN);
         int textRight = boxX + boxWidth - PADDING;
-        int maxHeight = screenHeight - 2 * MARGIN - choiceRoom;
+        int room = screenHeight - 2 * MARGIN - choiceRoom;
+        int share = Math.max(screenHeight * MAX_SCREEN_PERCENT / 100,
+                Math.max(MIN_BOX_HEIGHT, HEADSHOT_SIZE + 2 * PADDING));
+        int maxHeight = Math.min(room, share);
         int frameSize = headshot ? frameSize(maxHeight, boxX, textRight) : 0;
 
         int textX = frameSize > 0 ? boxX + PADDING + frameSize + HEADSHOT_GAP : boxX + PADDING;
@@ -79,13 +92,16 @@ record DialogueLayout(
         int lines = linesForWidth.applyAsInt(textWidth);
         int header = name ? fontHeight + NAME_DIVIDER_GAP + DIVIDER_HEIGHT + DIVIDER_TEXT_GAP : 0;
 
-        int wanted = PADDING + header + lines * lineHeight + BOTTOM_PADDING;
+        int around = PADDING + header + BOTTOM_PADDING;
+        int pageLines = Math.max(1, (maxHeight - around) / lineHeight);
+        // A text that pages fills the box with full pages; a shorter one grows the box to fit it.
+        int wanted = around + Math.min(lines, pageLines) * lineHeight;
         int minHeight = Math.max(MIN_BOX_HEIGHT, frameSize > 0 ? frameSize + 2 * PADDING : 0);
         int boxHeight = Math.min(Math.max(minHeight, wanted), maxHeight);
         int boxY = screenHeight - MARGIN - boxHeight;
         int top = boxY + PADDING;
         return new DialogueLayout(boxX, boxY, boxWidth, boxHeight, boxX + PADDING, top, frameSize, textX, textWidth,
-                top, top + fontHeight + NAME_DIVIDER_GAP, top + header, lines);
+                top, top + fontHeight + NAME_DIVIDER_GAP, top + header, lines, pageLines);
     }
 
     /**

@@ -10,8 +10,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The text box of the dialogue screen: one box along the bottom; a square headshot frame at its top-left padding when
  * there is a headshot; the name, a divider under it and the text in a column to the right of the frame, or from the
- * box's left padding without one; the box at least as tall as the frame and its padding, growing with the text, and
- * never into the room kept for the choices.
+ * box's left padding without one; the box at least as tall as the frame and its padding, growing with the text up to
+ * two fifths of the screen, and never into the room kept for the choices; and a text with more lines than that box
+ * holds paged.
  */
 class DialogueLayoutTest {
     /** Minecraft's font: 9 pixels a line, and the screen spaces text lines 11 pixels apart. */
@@ -121,13 +122,54 @@ class DialogueLayoutTest {
         assertEquals(HEIGHT_2 - MARGIN, layout.boxY() + layout.boxHeight());
     }
 
-    /** However long the text, the box leaves the choices their room and the top margin. */
+    /** A text that fits in the box is not paged: the box holds all its lines. */
     @Test
-    void aLongTextStopsGrowingTheBoxAtTheChoiceRoom() {
+    void aTextThatFitsIsNotPaged() {
+        DialogueLayout layout = layout(WIDTH_2, HEIGHT_2, true, true, 0, lines(9));
+        assertTrue(layout.pageLines() >= layout.lineCount());
+    }
+
+    /**
+     * A long text grows the box to two fifths of the screen at most, and pages. At GUI scale 4 that is 108 of 270 pixels:
+     * after the top padding, the name and divider (9 + 3 + 1 + 5) and the bottom padding, 58 pixels hold five lines, and
+     * the box fits those five lines exactly.
+     */
+    @Test
+    void aLongTextStopsGrowingTheBoxAtTwoFifthsOfTheScreenAndPages() {
         int choiceRoom = ChoiceLayout.reservedHeight(5, LINE, 8);
         DialogueLayout layout = layout(WIDTH_4, HEIGHT_4, true, true, choiceRoom, lines(100));
-        assertEquals(MARGIN + choiceRoom, layout.boxY());
+        assertTrue(layout.lineCount() > layout.pageLines());
+        assertEquals(5, layout.pageLines());
+        assertEquals(PADDING + 18 + 5 * LINE + DialogueLayout.BOTTOM_PADDING, layout.boxHeight());
+        assertTrue(layout.boxHeight() <= HEIGHT_4 * 2 / 5);
+        assertEquals(HEIGHT_4 - MARGIN, layout.boxY() + layout.boxHeight());
         assertEquals(SIZE, layout.frameSize());
+        int lastLineEnd = layout.textY() + layout.pageLines() * LINE;
+        assertEquals(layout.boxY() + layout.boxHeight(), lastLineEnd + DialogueLayout.BOTTOM_PADDING,
+                "a full page ends the bottom padding above the box's bottom");
+
+        // At GUI scale 2 the same share is 216 of 540 pixels: 166 pixels for the text, fifteen lines.
+        assertEquals(15, layout(WIDTH_2, HEIGHT_2, true, true, choiceRoom, lines(100)).pageLines());
+        // Without a name the text starts at the top padding, which leaves room for one more line.
+        assertEquals(6, layout(WIDTH_4, HEIGHT_4, true, false, choiceRoom, lines(100)).pageLines());
+    }
+
+    /** On a short screen the room kept for the choices limits the box before the share does. */
+    @Test
+    void onAShortScreenTheChoiceRoomLimitsTheBox() {
+        int choiceRoom = ChoiceLayout.reservedHeight(5, LINE, 8);
+        DialogueLayout layout = layout(WIDTH_4, 150, true, true, choiceRoom, lines(100));
+        assertEquals(MARGIN + choiceRoom, layout.boxY());
+        assertTrue(layout.lineCount() > layout.pageLines());
+        assertEquals(3, layout.pageLines());
+    }
+
+    /** The share never makes the box too short for a full headshot when the screen has the room. */
+    @Test
+    void theShareLeavesRoomForAFullHeadshot() {
+        DialogueLayout layout = layout(WIDTH_4, 200, true, true, 0, lines(100));
+        assertEquals(SIZE, layout.frameSize());
+        assertEquals(SIZE + 2 * PADDING, layout.boxHeight());
     }
 
     /** The continue hint sits at the bottom right of the box, inside the bottom padding. */

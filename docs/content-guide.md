@@ -775,26 +775,38 @@ Layout:
   speaker and it is loaded. With neither, there is no headshot and the text starts at the box's left edge. On a very
   small window the headshot is left out.
 - Right of the headshot: the speaker's name, a divider, and the text, which types out character by character. The box
-  grows with the text, up to the room left above it for the choices. Text does not scroll, so split long speeches
-  across nodes.
-- Choices stack above the box on the right. The first nine are numbered `1.` to `9.`. Each label is one line, and a
-  label too long for its row is cut short, so keep choice text short. Grayed-out choices are dimmed. When there are
-  more choices than fit, the list scrolls and arrows mark the hidden ones.
-- When the text has finished and the node has no choices, "Space or click to continue" shows at the bottom right.
+  grows with the text up to two fifths of the screen's height (or a full headshot's height, where that is more),
+  and never into the room left above it for the choices.
+- Text longer than the box holds is split into pages, so a long speech can stay in one node; you never need to know
+  the box's size. Pages break between whole lines, and at a blank line (a paragraph break) when one falls in the lower
+  half of the page. Each page types out on its own, and a page indicator such as `1/3` shows at the bottom right. How
+  many pages a text takes depends on the player's window and GUI scale, so do not write text that refers to a page.
+- Choices stack above the box on the right, once the last page is shown. The first nine are numbered `1.` to `9.`.
+  Each label is one line, and a label too long for its row is cut short, so keep choice text short. Grayed-out choices
+  are dimmed. When there are more choices than fit, the list scrolls and arrows mark the hidden ones.
+- When a page has finished and another follows, "Space or click for more" shows at the bottom right. When the last
+  page has finished and the node has no choices, "Space or click to continue" shows there.
 
 Controls:
 
 | Input | Effect |
 |---|---|
-| Left click, Space, Enter or keypad Enter | While the text types: shows all of it. When it has finished and the node has no choices: continues. |
-| `1` to `9`, top row or keypad | Picks that choice, once the text has finished. |
-| Left click on a choice | Picks it, once the text has finished. Before that, the click finishes the text. |
+| Left click, Space, Enter or keypad Enter | While a page types: shows all of it. When it has finished: turns to the next page; on the last page, continues when the node has no choices. Holding the key down only shows the page in full: turning a page or continuing takes a new press. |
+| `1` to `9`, top row or keypad | Picks that choice, once the last page has finished. |
+| Left click on a choice | Picks it, once the last page has finished. Before that, the click finishes the page. |
 | Hover a grayed-out choice | Shows its `unavailable_message`. It cannot be picked. |
 | Mouse wheel, Up, Down | Scrolls the choice list when it does not fit. |
 | Escape | Ends the conversation. No actions run. |
 
-After a pick or a continue, the screen accepts no further pick or continue until the server sends the next node, for
-up to 2 seconds. Escape still works.
+Turning a page happens on the player's client, with no wait for the server; the server sees only the continue or the
+pick after the last page. After a pick or a continue, the screen accepts no further pick or continue until the server
+sends the next node, for up to 2 seconds. Escape still works. Every node the server sends starts on its first page,
+including the same node again: a choice that leads back to its own node repeats the whole speech, and so does a pick
+the server refuses because the choice is no longer available.
+
+A resize or a GUI scale change mid-speech wraps the text again and can change the number of pages. The screen keeps the
+reader's place: it shows the page holding the start of the page they were reading, with what they had already seen
+shown at once.
 
 While the screen is open, the HUD elements under the box are hidden: hotbar, health, armor, food, air, mount health,
 the experience, locator or jump bar, the experience level, the held item's name and the crosshair. The chat stays,
