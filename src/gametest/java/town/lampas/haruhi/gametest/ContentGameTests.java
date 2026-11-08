@@ -5,23 +5,41 @@ import com.mojang.brigadier.tree.CommandNode;
 import com.mojang.serialization.DataResult;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.commands.CommandSource;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.server.permissions.PermissionSet;
+import net.minecraft.util.Util;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Property;
+import town.lampas.haruhi.Haruhi;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.ContentServiceImpl;
 import town.lampas.haruhi.content.ValidatedBundle;
@@ -171,6 +189,159 @@ public final class ContentGameTests {
         }
         for (CommandNode<CommandSourceStack> child : node.getChildren()) {
             collect(child, path + " " + child.getUsageText(), usable, found);
+        }
+    }
+
+    /**
+     * {@code /haruhi content validate} replies after the command has returned, so a source that collects output only
+     * while the command runs, as RCON does, gets nothing, and the server log must carry the reply. Validates a file
+     * under {@code config/haruhi/bundles/} and a missing file, each from a source that records what it is sent, and
+     * reads Haruhi's log through a Log4j appender.
+     *
+     * <p>The commands run in a task queued on the server, as RCON's {@code executeBlocking} runs them. A GameTest tick
+     * is not inside a task, and there {@code server.execute} runs at once instead of queuing, so a file read that
+     * finished before the command returned would reply inline.
+     */
+    @GameTest(maxTicks = 200)
+    public void contentRepliesAfterTheCommandReturnsGoToTheLog(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        String file = "haruhi-gametest/replies-" + UUID.randomUUID() + ".json";
+        String missing = "haruhi-gametest/missing-" + UUID.randomUUID() + ".json";
+        Path path = FabricLoader.getInstance().getConfigDir().resolve("haruhi").resolve("bundles").resolve(file);
+        String seed = seedText();
+        CompletableFuture<Void> written = CompletableFuture.runAsync(() -> {
+            try {
+                Files.createDirectories(path.getParent());
+                Files.writeString(path, seed, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }, Util.ioPool());
+        LogCapture log = new LogCapture();
+        RecordingSource valid = new RecordingSource();
+        RecordingSource absent = new RecordingSource();
+        AtomicBoolean started = new AtomicBoolean();
+        AtomicReference<String> atReturn = new AtomicReference<>();
+        Runnable cleanUp = () -> {
+            log.detach();
+            CompletableFuture.runAsync(() -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }, Util.ioPool());
+        };
+        // On a timeout too, so a failed run leaves no appender on the logger for the tests after it.
+        helper.runAfterDelay(195, cleanUp);
+        helper.succeedWhen(() -> {
+            if (!started.get()) {
+                helper.assertTrue(written.isDone(), "the bundle file is not written yet");
+                helper.assertTrue(!written.isCompletedExceptionally(), "could not write " + path);
+                started.set(true);
+                log.attach();
+                server.schedule(server.wrapRunnable(() -> {
+                    server.getCommands().performPrefixedCommand(
+                            valid.stack(server, "haruhi-gametest-valid"), "haruhi content validate " + file);
+                    server.getCommands().performPrefixedCommand(
+                            absent.stack(server, "haruhi-gametest-absent"), "/haruhi content validate " + missing);
+                    atReturn.set(valid.lines() + " " + absent.lines());
+                }));
+            }
+            helper.assertTrue(atReturn.get() != null, "the queued commands have not run yet");
+            helper.assertValueEqual(atReturn.get(), "[] []", "what the sources had when the commands returned");
+
+            helper.assertTrue(valid.lines().size() == 1 && valid.lines().getFirst().startsWith("Valid: "),
+                    "the source of a valid file was sent " + valid.lines());
+            String validLine = "INFO haruhi-gametest-valid ran /haruhi content validate " + file + ": "
+                    + valid.lines().getFirst();
+            helper.assertTrue(log.lines().contains(validLine), "the log has no '" + validLine + "': " + log.lines());
+
+            helper.assertTrue(absent.lines().size() == 1
+                            && absent.lines().getFirst().startsWith("There is no bundle file " + missing),
+                    "the source of a missing file was sent " + absent.lines());
+            String absentLine = "WARN haruhi-gametest-absent ran /haruhi content validate " + missing + ": "
+                    + absent.lines().getFirst();
+            helper.assertTrue(log.lines().contains(absentLine),
+                    "the log has no '" + absentLine + "': " + log.lines());
+            cleanUp.run();
+        });
+    }
+
+    /** A command source that keeps the text of every message it is sent, and never informs operators. */
+    private static final class RecordingSource implements CommandSource {
+        private final List<String> lines = new CopyOnWriteArrayList<>();
+
+        CommandSourceStack stack(MinecraftServer server, String name) {
+            return new CommandSourceStack(this, Vec3.ZERO, Vec2.ZERO, server.overworld(),
+                    LevelBasedPermissionSet.OWNER, name, Component.literal(name), server, null);
+        }
+
+        List<String> lines() {
+            return List.copyOf(lines);
+        }
+
+        @Override
+        public void sendSystemMessage(Component message) {
+            lines.add(message.getString());
+        }
+
+        @Override
+        public boolean acceptsSuccess() {
+            return true;
+        }
+
+        @Override
+        public boolean acceptsFailure() {
+            return true;
+        }
+
+        @Override
+        public boolean shouldInformAdmins() {
+            return false;
+        }
+    }
+
+    /**
+     * Records the level and text of what Haruhi's logger writes. It hangs on the root logger configuration of the
+     * Log4j context the SLF4J binding gives {@link Haruhi}'s class loader, which is the context {@link Haruhi#LOGGER}
+     * writes to, and keeps only events of that logger. {@code Logger.addAppender} is not used: it gives the logger a
+     * configuration of its own that is not additive, which would cut Haruhi's log off from the console and the files.
+     */
+    private static final class LogCapture extends AbstractAppender {
+        private final List<String> lines = new CopyOnWriteArrayList<>();
+        private LoggerContext context;
+
+        LogCapture() {
+            super("haruhi-gametest-log", null, null, true, Property.EMPTY_ARRAY);
+        }
+
+        void attach() {
+            context = (LoggerContext) LogManager.getContext(Haruhi.class.getClassLoader(), false);
+            start();
+            context.getConfiguration().getRootLogger().addAppender(this, null, null);
+            context.updateLoggers();
+        }
+
+        /** Takes the appender off again. Does nothing when it is not attached. */
+        void detach() {
+            if (context != null) {
+                context.getConfiguration().getRootLogger().removeAppender(getName());
+                context.updateLoggers();
+                context = null;
+                stop();
+            }
+        }
+
+        List<String> lines() {
+            return List.copyOf(lines);
+        }
+
+        @Override
+        public void append(LogEvent event) {
+            if (Haruhi.MOD_ID.equals(event.getLoggerName())) {
+                lines.add(event.getLevel() + " " + event.getMessage().getFormattedMessage());
+            }
         }
     }
 

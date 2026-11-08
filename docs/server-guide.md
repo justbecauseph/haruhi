@@ -297,8 +297,8 @@ Every `/haruhi` command needs permission level 2 (game master) or higher; a Game
 this. Replies are plain text. Failures come back as red lines, one line per problem.
 
 The success messages of `/haruhi dialogue`, `/haruhi flags set` and `clear`, `/haruhi npc spawn`, `set` and
-`remove`, and `/haruhi bind` and `unbind` are also shown to other operators, as vanilla commands do. The other commands
-reply only to you.
+`remove`, `/haruhi bind` and `unbind`, and `/haruhi content import`, `activate` and `rollback` are also shown to other
+operators, as vanilla commands do. The other commands reply only to you.
 
 Arguments that are a plain string, such as the flag namespace, must be quoted when they contain anything other than
 letters, digits, `_`, `-`, `.` and `+`. Flag namespaces such as `haruhi:example/greeter` contain `:` and `/`, so write
@@ -342,6 +342,31 @@ Rolled back to revision 1.
 ```
 
 When there are none, `list` replies `No content revisions are stored.`
+
+#### Where the replies appear
+
+`status` replies while the command runs. `validate`, `import`, `list`, `activate` and `rollback` read a file or
+storage off the server thread and reply when that finishes, after the command has returned. A player sees those
+replies in chat as usual. A source that stops listening when the command returns gets nothing: RCON sends back only
+what arrives while the command runs, so `rcon "haruhi content validate town.json"` prints nothing. A late reply can
+also turn up in the response to a later RCON command.
+
+So every one of those replies is also written to the server log (the console and `logs/latest.log`), one line per
+reply line, with the source's name and the command as typed: INFO for a success, WARN for a failure. The source is
+`Rcon` for RCON, `Server` for the console, and the player's name otherwise. The messages look like this:
+
+```
+Rcon ran /haruhi content validate town.json: Valid: 3 NPCs, 4 graphs, digest 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+Rcon ran /haruhi content import town.json: Stored revision 2 (digest 9f86d081884c). It is not active. Run /haruhi content activate 2 to use it.
+Rcon ran /haruhi content validate town.json: There is no bundle file town.json under /srv/minecraft/config/haruhi/bundles
+```
+
+Over RCON, run the command, then read the log; `/haruhi content status` replies at once, so it shows over RCON what is
+active. With `broadcast-rcon-to-ops` and the `send_command_feedback` game rule on (both vanilla defaults), operators
+in game also see the replies of `import`, `activate` and `rollback`. With the `log_admin_commands` game rule on (also
+the default), vanilla logs those replies a second time as `[Rcon: ...]`, or `[<player>: ...]` when a player ran the
+command. A reply on the console is logged twice as well: once as the console's own output and once with the
+`Server ran ...` prefix.
 
 ### /haruhi dialogue
 
@@ -512,6 +537,9 @@ bound.
 4. `/haruhi content activate <id>` makes it active for the whole server.
 5. `/haruhi content status` confirms it. If something is wrong, `/haruhi content rollback` goes back.
 
+Over RCON, the replies of steps 2 to 4 and of `rollback` are in the server log, not in the RCON response; see
+[Where the replies appear](#where-the-replies-appear).
+
 ### How import and validate find files
 
 The path is relative to `config/haruhi/bundles/`. A path that leaves that folder through `..`, or through a symbolic
@@ -657,6 +685,8 @@ same flags: the last write of each flag wins.
 | `Could not load the active content revision, so no content is active` | Storage failed when asked for the active revision. | Check the database; then restart or activate a revision. |
 | `Could not store and activate the content bundle from <author>` | The startup bundle validated, but storing or activating it failed. | Check the database. |
 | `Activated content revision <id>` or `Activated content revision <id> from startup:seed` | Startup content is active. | Nothing. |
+| `<source> ran /haruhi content <command>: <reply>` | The reply to a `/haruhi content` command other than `status`, logged because it arrived after the command returned. INFO is a success, WARN a failure, one line per problem. | Read it as the command's reply; for a failure, fix what it names. |
+| `rcon "haruhi content validate <file>"` (or `import`, `list`, `activate`, `rollback`) prints nothing | RCON returns only what is sent while the command runs, and these commands reply later. | Read the reply in the server log, or check with `/haruhi content status`. See [Where the replies appear](#where-the-replies-appear). |
 | `Could not read <path>; command actions are disabled` | `config/haruhi-dialogue.json` is not valid JSON or has an out-of-range level. The defaults apply, so bundles that use `haruhi:command` fail validation. | Fix the file and restart. |
 | `Could not load dialogue flags and visits for <uuid>; retrying in 100 ticks` | Storage failed to load a player's data. The player's waiting conversation was dropped. | Check the database; the load retries every 5 seconds. |
 | `Could not write <n> dialogue flag change(s) for <uuid>; will retry` | A batch failed and goes into the next one. | Check the database. |
