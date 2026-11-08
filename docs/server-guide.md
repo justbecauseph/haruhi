@@ -39,14 +39,14 @@ guide](content-guide.md); models and textures are in [models and animations](mod
 
 ## Install
 
-Build the jar as the [README](../README.md#build-from-source) describes, then copy `build/libs/haruhi-0.2.0.jar` into
+Build the jar as the [README](../README.md#build-from-source) describes, then copy `build/libs/haruhi-0.2.1.jar` into
 the `mods/` folder of the server and of every client.
 
 ### Which side needs what
 
 | Jar | Server | Client |
 |---|---|---|
-| `haruhi-0.2.0.jar` | required | required |
+| `haruhi-0.2.1.jar` | required | required |
 | Fabric API | required | required |
 | GeckoLib 5.5.5 or newer | not used | recommended |
 
