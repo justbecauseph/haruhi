@@ -17,8 +17,8 @@ Each player's dialogue flags and visit counts are stored in memory or in Postgre
 - The Lampas Portal can validate, import and activate bundles through `haruhi:content/*` methods on Minecraft's
   management connection, with the server fetching each bundle from the Portal over HTTPS. It is off until
   `config/haruhi-content.json` turns it on.
-- The visual-novel screen types out the text, shows a portrait or a 3D headshot of the speaker, and takes choices by
-  click or the number keys 1 to 9. While it is open, most HUD elements under the text box are hidden and the chat
+- The visual-novel screen types out the text, in pages when it is longer than the box holds, shows a portrait or a 3D
+  headshot of the speaker, and takes choices by click or the number keys 1 to 9. While it is open, most HUD elements under the text box are hidden and the chat
   moves above it.
 - The NPC entity stays where it is spawned, takes no damage except from `/kill` and the void, turns to face the player
   who talks to it, and scales from 1/16 up to 4 times normal size.
