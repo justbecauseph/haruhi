@@ -244,7 +244,10 @@ blocks and entities" in `docs/content-guide.md`, are the user-facing reference; 
   bed or double chest has one binding for both halves (`BlockParts`). A player breaking that block removes the
   binding; any other change leaves it inactive until the block is back. `BlockBindings` loads in
   `ServerLevelEvents.LOAD`, so no use reads the file. An entity binding is the persistent attachment `haruhi:binding`,
-  not copied on mob conversion and not synced.
+  not copied on mob conversion and not synced. `EntityBindingEnds` logs its end once: a death (`AFTER_DEATH`), a
+  conversion (`MOB_CONVERSION`, before vanilla discards the old mob) or an unload whose removal reason destroys the
+  entity. Each takes the binding off as it logs, so a later event for the same entity finds none. An unload that does
+  not destroy the entity (a chunk unload, a dimension change, whose new entity keeps the binding) logs nothing.
 
 ## Blockbench model converter
 

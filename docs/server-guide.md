@@ -500,7 +500,28 @@ bound.
   chest standing, so a binding saved on that chest stays.
 - An entity binding is saved on the entity, as the Fabric data attachment `haruhi:binding`. It moves with the entity,
   across dimensions too, and goes when the entity dies or is removed. It does not survive a conversion: a villager
-  struck by lightning, a zombie villager that is cured, a mob that drowns into another kind.
+  struck by lightning, a zombie villager that is cured, a mob that drowns into another kind. Each of these ends is
+  logged once, naming the graph, the entity and how it went. An operator who kills a bound mob or villager is also
+  told so in chat:
+
+  ```
+  Removed the Haruhi binding of town:clerk on minecraft:villager "Phillip" 0f8fad5b-d9cb-469f-a165-70867728950e in minecraft:overworld at -2014.48 64.00 -1517.29: died (Phillip was slain by Steve)
+  Removed the Haruhi binding of town:clerk on minecraft:villager "Phillip" 0f8fad5b-d9cb-469f-a165-70867728950e in minecraft:overworld at -2014.48 64.00 -1517.29: converted to minecraft:witch 6a0f1c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b
+  Removed the Haruhi binding of town:clerk on minecraft:zombie "Zombie" 3c9e7d1a-2b4f-4a6c-9d8e-1f2a3b4c5d6e in minecraft:overworld at 10.50 64.00 -3.50: removed (discarded)
+  ```
+
+  - `died (...)` gives vanilla's death message.
+  - A villager that a zombie kills and turns into a zombie villager logs `converted to minecraft:zombie_villager ...`,
+    not `died`.
+  - `removed (discarded)` is a despawn or a mod discarding the entity.
+  - `removed (killed)` is an entity removed without dying: one that is not living, such as an item frame or a
+    minecart, or an armor stand that is broken, or `/kill` of an armor stand or the ender dragon. No operator is told
+    of these.
+  - A chunk unloading, a player logging out with a ridden entity, and a change of dimension keep the binding and log
+    nothing.
+
+  To bring the conversation back, bind another entity (after a conversion, the new mob), or spawn a Haruhi NPC, which
+  takes no damage except from `/kill` and the void.
 
 ## Content revisions
 
@@ -673,4 +694,5 @@ same flags: the last write of each flag wins.
 | `Haruhi storage closed before this operation ran` | A storage call was queued when storage closed at shutdown. | Nothing, unless it appears while the server is running. |
 | Right-clicking an NPC does nothing | The NPC's profile is missing from the active content, has no `dialogue`, or no content is active. | `/haruhi content status`, then check the profile. |
 | Using a bound block or entity does nothing, and its vanilla use does not happen either | The active content lacks the binding's graph. | `/haruhi bindings all` marks it `[missing graph]`; activate content that has the graph, or bind another one. |
+| `Removed the Haruhi binding of <graph> on <entity> ...: died (...)`, `converted to <type> <uuid>`, `removed (discarded)` or `removed (killed)` | A bound entity died, converted or was removed, and its binding went with it (see [Binding behaviour](#binding-behaviour)). | Bind another entity, or spawn a Haruhi NPC, which takes no damage except from `/kill` and the void. |
 | `<name>'s dialogue data is still loading; try again` | The player joined moments ago, or the load keeps failing. | Wait, then check the log for load errors. |

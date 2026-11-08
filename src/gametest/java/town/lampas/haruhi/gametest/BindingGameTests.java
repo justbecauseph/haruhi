@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.commands.CommandSource;
 import net.minecraft.commands.CommandSourceStack;
@@ -26,9 +27,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.ConversionParams;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.npc.villager.VillagerProfession;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.Snowball;
@@ -36,6 +39,7 @@ import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ChestBlock;
@@ -44,11 +48,18 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Property;
+import town.lampas.haruhi.Haruhi;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.binding.Binding;
 import town.lampas.haruhi.binding.BlockBindings;
@@ -78,6 +89,11 @@ public final class BindingGameTests {
     private static final Vec3 VILLAGER_AT = new Vec3(2.5, 1.0, 4.5);
     private static final BlockPos DOOR_AT = new BlockPos(1, 1, 4);
     private static final BlockPos BED_FOOT_AT = new BlockPos(5, 1, 3);
+
+    static {
+        // Before any test runs, so the first binding end of the run is already recorded.
+        BindingEndLog.install();
+    }
 
     @GameTest(maxTicks = 200)
     public void aBoundChestOpensItsConversationInsteadOfItsInventory(GameTestHelper helper) {
@@ -394,9 +410,153 @@ public final class BindingGameTests {
                 .thenSucceed();
     }
 
+    /**
+     * A bound villager that dies loses its binding at once, and the end is logged once: not again when the dead
+     * villager is removed 20 ticks later.
+     */
+    @GameTest(maxTicks = 200)
+    public void aBoundEntityThatDiesLosesItsBindingAndTheEndIsLoggedOnce(GameTestHelper helper) {
+        Villager[] villager = new Villager[1];
+        afterStartup(helper)
+                .thenExecute(() -> {
+                    villager[0] = spawnLibrarian(helper);
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind entity " + villager[0].getStringUUID() + " " + BOUND);
+                    villager[0].kill(helper.getLevel());
+                    helper.assertFalse(villager[0].isAlive(), "the villager has died");
+                    helper.assertTrue(EntityBindings.get(villager[0]).isEmpty(), "a dead villager keeps no binding");
+                    List<String> lines = BindingEndLog.naming(villager[0]);
+                    helper.assertValueEqual(lines.size(), 1, "lines logged for the death");
+                    helper.assertTrue(lines.getFirst().startsWith("Removed the Haruhi binding of " + BOUND + " on "
+                            + "minecraft:villager"), "the line names the graph and the entity: " + lines.getFirst());
+                    helper.assertTrue(lines.getFirst().contains(": died ("), "the line says it died: "
+                            + lines.getFirst());
+                })
+                .thenWaitUntil(() -> helper.assertTrue(villager[0].isRemoved(),
+                        "the dead villager has not been removed yet"))
+                .thenExecute(() -> helper.assertValueEqual(BindingEndLog.naming(villager[0]).size(), 1,
+                        "lines logged after the dead villager's removal"))
+                .thenSucceed();
+    }
+
+    /** A bound villager converted to a witch: the witch is not bound, and one line says what it became. */
+    @GameTest(maxTicks = 200)
+    public void aBoundEntityThatConvertsLosesItsBindingAndTheEndIsLoggedOnce(GameTestHelper helper) {
+        afterStartup(helper)
+                .thenExecute(() -> {
+                    Villager villager = spawnLibrarian(helper);
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind entity " + villager.getStringUUID() + " " + BOUND);
+                    Mob witch = villager.convertTo(EntityTypes.WITCH, ConversionParams.single(villager, false, false),
+                            converted -> converted.setNoAi(true));
+                    helper.assertTrue(witch != null, "the villager did not convert");
+                    helper.assertTrue(villager.isRemoved(), "the converted villager is discarded");
+                    helper.assertTrue(EntityBindings.get(witch).isEmpty(), "the witch is not bound");
+                    helper.assertTrue(EntityBindings.get(villager).isEmpty(), "the villager keeps no binding");
+                    List<String> lines = BindingEndLog.naming(villager);
+                    helper.assertValueEqual(lines.size(), 1, "lines logged for the conversion");
+                    helper.assertTrue(lines.getFirst().endsWith(": converted to minecraft:witch "
+                            + witch.getStringUUID()), "the line names the new mob: " + lines.getFirst());
+                    witch.discard();
+                })
+                .thenSucceed();
+    }
+
+    /** A bound villager discarded without dying is logged; an unbound one is not. */
+    @GameTest(maxTicks = 200)
+    public void aDiscardedBoundEntityIsLoggedAndAnUnboundOneIsNot(GameTestHelper helper) {
+        afterStartup(helper)
+                .thenExecute(() -> {
+                    Villager bound = spawnLibrarian(helper);
+                    Villager unbound = spawnLibrarian(helper);
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind entity " + bound.getStringUUID() + " " + BOUND);
+                    bound.discard();
+                    unbound.discard();
+                    List<String> lines = BindingEndLog.naming(bound);
+                    helper.assertValueEqual(lines.size(), 1, "lines logged for the discarded bound villager");
+                    helper.assertTrue(lines.getFirst().endsWith(": removed (discarded)"),
+                            "the line says how it went: " + lines.getFirst());
+                    helper.assertTrue(BindingEndLog.naming(unbound).isEmpty(), "an unbound villager logs nothing");
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * A bound villager that changes dimension keeps its binding and logs nothing. Vanilla removes the old entity with
+     * {@code CHANGED_DIMENSION}, so this fails if a removal that does not destroy the entity were taken for an end.
+     */
+    @GameTest(maxTicks = 200)
+    public void aBoundEntityThatChangesDimensionKeepsItsBindingAndLogsNothing(GameTestHelper helper) {
+        afterStartup(helper)
+                .thenExecute(() -> {
+                    Villager villager = spawnLibrarian(helper);
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind entity " + villager.getStringUUID() + " " + BOUND);
+                    ServerLevel nether = helper.getLevel().getServer().getLevel(Level.NETHER);
+                    helper.assertTrue(nether != null, "the test server has no nether");
+                    Vec3 there = new Vec3(0.5, 64.0, 0.5);
+                    nether.getChunkAt(BlockPos.containing(there));
+                    Entity moved = villager.teleport(new TeleportTransition(nether, there, Vec3.ZERO, 0.0F, 0.0F,
+                            TeleportTransition.DO_NOTHING));
+                    helper.assertTrue(moved != null && moved != villager, "the villager did not change dimension");
+                    helper.assertValueEqual(moved.getStringUUID(), villager.getStringUUID(), "the villager's UUID");
+                    helper.assertValueEqual(EntityBindings.get(moved).map(Binding::graph), Optional.of(BOUND),
+                            "the binding after the dimension change");
+                    helper.assertTrue(BindingEndLog.naming(villager).isEmpty(),
+                            "a dimension change logs no end: " + BindingEndLog.naming(villager));
+                    EntityBindings.remove(moved);
+                    moved.discard();
+                })
+                .thenSucceed();
+    }
+
     /** The test's player, joined and standing in the test structure. */
     private static final class Scene {
         ServerPlayer player;
+    }
+
+    /** Waits for the startup activation, which would otherwise replace a fixture activated before it. */
+    private static GameTestSequence afterStartup(GameTestHelper helper) {
+        return helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(HaruhiServices.content().isStartupComplete(),
+                        "the startup content activation has not finished"));
+    }
+
+    /**
+     * The binding ends Haruhi logs during the test run, kept by one appender installed when {@link BindingGameTests}
+     * loads, so a test that fails midway leaves nothing behind. The appender goes on the root logger config: adding it to the
+     * {@code haruhi} logger itself would give that logger a config of its own, and the log files would lose its lines.
+     * GameTests run side by side, so a test reads only the lines that name its own entity.
+     */
+    private static final class BindingEndLog {
+        private static final List<String> LINES = new CopyOnWriteArrayList<>();
+
+        static {
+            AbstractAppender appender = new AbstractAppender("haruhi-gametest-binding-ends", null, null, true,
+                    Property.EMPTY_ARRAY) {
+                @Override
+                public void append(LogEvent event) {
+                    String line = event.getMessage().getFormattedMessage();
+                    if (Haruhi.MOD_ID.equals(event.getLoggerName())
+                            && line.startsWith("Removed the Haruhi binding of ")) {
+                        LINES.add(line);
+                    }
+                }
+            };
+            appender.start();
+            ((LoggerContext) LogManager.getContext(false)).getConfiguration().getRootLogger()
+                    .addAppender(appender, null, null);
+        }
+
+        private BindingEndLog() {}
+
+        /** Loads this class, whose initialiser installs the appender. */
+        static void install() {}
+
+        static List<String> naming(Entity entity) {
+            return LINES.stream().filter(line -> line.contains(entity.getStringUUID())).toList();
+        }
     }
 
     /**
@@ -404,9 +564,7 @@ public final class BindingGameTests {
      * uses from a client that is not), stands it in the structure, and waits for its dialogue flags.
      */
     private static GameTestSequence join(GameTestHelper helper, Scene scene) {
-        return helper.startSequence()
-                .thenWaitUntil(() -> helper.assertTrue(HaruhiServices.content().isStartupComplete(),
-                        "the startup content activation has not finished"))
+        return afterStartup(helper)
                 .thenExecute(() -> {
                     scene.player = helper.makeMockServerPlayerInLevel();
                     scene.player.connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
