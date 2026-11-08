@@ -12,7 +12,7 @@ import town.lampas.haruhi.Haruhi;
  * Entity bindings, held as the persistent Fabric data attachment {@code haruhi:binding} on the entity. The binding is
  * saved with the entity and moves with it, across dimensions too, and goes when the entity dies or is discarded. It is
  * not copied on a mob conversion (a villager struck by lightning, a zombie villager cured), and it is not synced to
- * clients. Server thread only.
+ * clients. {@link EntityBindingEnds} logs each of these ends. Server thread only.
  */
 public final class EntityBindings {
     private static @Nullable AttachmentType<Binding> type;

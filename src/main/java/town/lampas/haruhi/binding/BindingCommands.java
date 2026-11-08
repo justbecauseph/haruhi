@@ -300,7 +300,7 @@ final class BindingCommands {
     }
 
     /** One entity: its type, name, UUID, dimension and position. */
-    private static String describe(Entity entity) {
+    static String describe(Entity entity) {
         return String.format(Locale.ROOT, "%s \"%s\" %s in %s at %.2f %.2f %.2f",
                 BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()),
                 entity.getName().getString(), entity.getStringUUID(), entity.level().dimension().identifier(),
