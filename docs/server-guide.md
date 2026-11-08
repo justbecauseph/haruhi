@@ -23,9 +23,9 @@ guide](content-guide.md); models and textures are in [models and animations](mod
 - Every client needs Haruhi. The vanilla dialog fallback exists, but Fabric API's registry sync keeps a client without
   Haruhi from joining (see [Which side needs what](#which-side-needs-what)).
 - An NPC's hitbox is 0.6 by 1.8 blocks times its profile's `scale`, whatever the size of its model.
-- While the dialogue screen is open, the waypoint markers of the multiplayer locator bar still draw under the text
-  box. Haruhi hides Fabric API's info-bar element, which covers only the bar's background; vanilla draws the markers in
-  a separate step.
+- While the dialogue screen is open, the waypoint markers of the multiplayer locator bar and the action-bar message
+  still draw under the text box. Haruhi hides Fabric API's info-bar element, which covers only the locator bar's
+  background; vanilla draws the markers in a separate step.
 - A revision carries only the ids of models, textures, animations and portraits. Each client needs the files from a
   resource pack or a mod.
 - The default in-memory storage loses everything when the server stops.
@@ -75,8 +75,8 @@ Registry sync keeps a client without Haruhi from joining, so a normal player nev
 
 ### Singleplayer
 
-Haruhi's main entrypoint runs on clients as well, so a singleplayer world uses `config/haruhi.json` and
-`config/haruhi-dialogue.json` from the client's own `config/` folder. Storage is closed when a world stops and built
+Haruhi's main entrypoint runs on clients as well, so a singleplayer world uses `config/haruhi.json`,
+`config/haruhi-dialogue.json` and `config/haruhi-content.json` from the client's own `config/` folder. Storage is closed when a world stops and built
 again when the next world starts.
 
 ## Configuration files
@@ -279,9 +279,10 @@ HTTPS. `config/haruhi-content.json` controls that fetch. The file written on fir
 
 - The server builds the bundle URL from the origin and the request id, `<origin>/api/v1/haruhi/requests/<request>/bundle`,
   and never takes a URL from a call, so a call cannot point the fetch at another host.
-- Unknown keys are refused. A file that cannot be read or does not validate is logged at `ERROR` as
-  `Haruhi content configuration <path> is invalid: <problem>; remote content is disabled`, and the server starts with
-  remote content off.
+- Unknown keys are refused. A file that does not validate is logged at `ERROR` as
+  `Haruhi content configuration <path> is invalid: <problem>; remote content is disabled`, and one that cannot be read
+  (or, on first start, written) as `Haruhi cannot read or write <path>; remote content is disabled`. In both cases the
+  server starts with remote content off.
 - The file is read once, at mod initialisation. Restart to apply a change.
 
 ### Enabling it
@@ -324,8 +325,9 @@ a `status` at once. Send it by position, `"params": [{...}]`, or by name, `"para
 takes `[{}]`. Vanilla refuses any other envelope (no `params`, the fields themselves as `params`, or an array of other
 than one element) with a JSON-RPC invalid-params error, and refuses every call with a JSON-RPC error before the
 server has initialised; between then and the server's start, Haruhi's methods answer `unavailable`. `list` and
-`export` read storage and wait for it up to 3 seconds, off the server thread; the others run on the server thread, as
-vanilla runs management methods.
+`export` read storage and wait for it up to 3 seconds, off the server thread, and answer `unavailable` with a `message`
+when storage does not answer in time (`Storage did not answer within 3 seconds`) or fails (`Storage failed: <reason>`).
+The others run on the server thread, as vanilla runs management methods.
 
 | Method | Param fields | Answer |
 |---|---|---|
@@ -342,7 +344,8 @@ A revision summary is `id`, `digest`, `author`, `created_at`, `activated_at` and
 first activated), and `active`; times are ISO-8601 instants. A `bindings` NPC whose profile the live content lacks has
 the problem `missing profile`, one with no profile `no profile`.
 
-Refusals that every call can get: `invalid` with the `field` and a `message` (the value is never quoted). Validate and
+Every method except `status`, which ignores its param, can answer `invalid` with the `field` and a `message` (the
+value is never quoted). Validate and
 import also answer `remote_disabled` and `too_large` (a `size` over `remote.max_bytes`), and validate, import and
 activate answer `conflict` (the request id is held for another call) and `busy` (8 requests run at once, or 512 are held).
 
@@ -366,9 +369,9 @@ A `done` result has `valid`:
 
 | `reason` | Meaning |
 |---|---|
-| `fetch_failed` | the Portal could not be reached, or the connection failed during the transfer |
+| `fetch_failed` | the connection was refused or failed (DNS, TLS, a reset), or broke during the transfer |
 | `http_status` | the Portal answered other than 200, for example 401 for an expired token |
-| `timeout` | the Portal did not send the whole bundle within 60 seconds |
+| `timeout` | no connection within 10 seconds, or the whole bundle not received within 60 seconds |
 | `size_mismatch` | the body is not the size the call named |
 | `sha256_mismatch` | the body's SHA-256 is not the one the call named |
 | `not_utf8` | the body is not UTF-8 |
@@ -434,7 +437,7 @@ letters, digits, `_`, `-`, `.` and `+`. Flag namespaces such as `haruhi:example/
 |---|---|
 | `/haruhi content validate <file>` | Reads `config/haruhi/bundles/<file>` and validates it. Stores nothing. |
 | `/haruhi content import <file>` | Validates the file and stores it as a new revision. Does not activate it. The author is your name. |
-| `/haruhi content list` | Lists the 20 newest revisions by creation time. |
+| `/haruhi content list` | Lists the 20 newest revisions, highest id first. |
 | `/haruhi content activate <id>` | Validates the stored revision again and makes it active. |
 | `/haruhi content rollback` | Activates the most recently activated revision other than the active one. |
 | `/haruhi content status` | Shows the active revision id, its digest, and how many NPC profiles and graphs it has. |
@@ -568,6 +571,8 @@ entity is not an NPC). With no NPC loaded, `list` replies `No NPCs are loaded`.
 - An NPC does not move, fall, despawn or get pushed, and pistons, explosions, fishing rods and splash potions do not
   affect it. It takes no damage except from `/kill` and the void, from creative players too. Only a teleport or a
   direct position change moves it.
+- A profile's `scale` may be above 0 and at most 4. Vanilla's `minecraft:scale` attribute stops at 1/16, so a smaller
+  value draws and sizes the NPC at 1/16.
 - The hitbox is 0.6 by 1.8 blocks times the profile's `scale`, whatever the size of the model. Clicks hit the hitbox,
   not the model. The client places the name tag just above the model.
 - The profile id and the last look are saved with the entity, so an NPC shows its look as soon as it loads.
@@ -580,9 +585,9 @@ conversation, as with an NPC.
 
 | Command | What it does |
 |---|---|
-| `/haruhi bind block <pos> <graph> [<speaker>]` | Binds the block at `<pos>` in your dimension. Replaces any binding the block had, on either half of a door, bed or double chest. |
+| `/haruhi bind block <pos> <graph> [<speaker>]` | Binds the block at `<pos>` in your dimension. Replaces any binding the block had, on either half of a door, tall plant, bed or double chest. |
 | `/haruhi bind entity <targets> <graph> [<speaker>]` | Binds each selected entity. Players and Haruhi NPCs are skipped. |
-| `/haruhi unbind block <pos>` | Removes the binding at `<pos>`, also in an unloaded chunk, or the binding of the block's other half (door, bed, double chest) in a loaded one. |
+| `/haruhi unbind block <pos>` | Removes the binding at `<pos>`, also in an unloaded chunk, or the binding of the block's other half (door, tall plant, bed, double chest) in a loaded one. |
 | `/haruhi unbind entity <targets>` | Removes the bindings of the selected entities. |
 | `/haruhi bindings` | Lists the block bindings and loaded bound entities within 32 blocks of where the command runs, in its dimension. |
 | `/haruhi bindings all` | Lists every block binding in every dimension, and every bound entity that is loaded. |
@@ -624,7 +629,9 @@ bound.
   replaces the vanilla interaction: no container, trade screen, item use or block placement against the block. The
   held item's own use that a client sends right after (a bucket emptied, an ender pearl thrown, food eaten) is refused
   for that tick and the next, and the player's inventory is sent again. The off hand gets nothing, and so does a fake
-  player from another mod (a machine that uses blocks). Spectators get the vanilla interaction.
+  player from another mod (a machine that uses blocks). A use from farther than the player's interaction range plus 1
+  block (for a block) or plus 3 blocks (for an entity) is also consumed and opens nothing. Spectators get the vanilla
+  interaction.
 - A binding whose graph the active content lacks gives the player nothing: no conversation and no vanilla interaction.
   Staff see it as `[missing graph]` in `/haruhi bindings`. A missing speaker profile only changes the name shown.
 - A block conversation is tied to the block's position: it ends when the player moves more than 8 blocks from the
@@ -637,8 +644,9 @@ bound.
   door swinging open; the server's block update puts it back.
 - Block bindings are saved per dimension, in that dimension's `data/haruhi/block_bindings.dat`. A binding records the
   block that was there when it was bound and applies only while that block is at the position, in any state (a
-  furnace that lights, a door that opens). A player who breaks the block removes its binding, and an operator who does
-  is told so. Any other change (an explosion, a piston, fluid, `/setblock`, `/fill`) leaves the binding in place but
+  furnace that lights, a door that opens). A player who breaks the block removes its binding. The log shows
+  `Removed the Haruhi binding of <graph> at <x> <y> <z> in <dimension>: <player> broke the block`, and an operator who
+  broke it gets `Removed the Haruhi binding of <graph> at <x> <y> <z> in <dimension>` in chat. Any other change (an explosion, a piston, fluid, `/setblock`, `/fill`) leaves the binding in place but
   inactive, shown as `[block is now <id>]`, until the same block is back; breaking another block that stands there
   meanwhile does not remove it. A binding does not follow a block a piston moves.
 - A block that takes two positions has one binding for both: a door or tall plant (lower and upper half), a bed (foot
@@ -650,14 +658,16 @@ bound.
 - An entity binding is saved on the entity, as the Fabric data attachment `haruhi:binding`. It moves with the entity,
   across dimensions too, and goes when the entity dies or is removed. It does not survive a conversion: a villager
   struck by lightning, a zombie villager that is cured, a mob that drowns into another kind. Each of these ends is
-  logged once, naming the graph, the entity and how it went. An operator who kills a bound mob or villager is also
-  told so in chat:
+  logged once, naming the graph, the entity and how it went:
 
   ```
   Removed the Haruhi binding of town:clerk on minecraft:villager "Phillip" 0f8fad5b-d9cb-469f-a165-70867728950e in minecraft:overworld at -2014.48 64.00 -1517.29: died (Phillip was slain by Steve)
   Removed the Haruhi binding of town:clerk on minecraft:villager "Phillip" 0f8fad5b-d9cb-469f-a165-70867728950e in minecraft:overworld at -2014.48 64.00 -1517.29: converted to minecraft:witch 6a0f1c2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b
   Removed the Haruhi binding of town:clerk on minecraft:zombie "Zombie" 3c9e7d1a-2b4f-4a6c-9d8e-1f2a3b4c5d6e in minecraft:overworld at 10.50 64.00 -3.50: removed (discarded)
   ```
+
+  An operator who kills a bound mob or villager gets the same line in chat without the part after the colon:
+  `Removed the Haruhi binding of town:clerk on minecraft:villager "Phillip" ...`.
 
   - `died (...)` gives vanilla's death message.
   - A villager that a zombie kills and turns into a zombie villager logs `converted to minecraft:zombie_villager ...`,
@@ -824,6 +834,13 @@ same flags: the last write of each flag wins.
 | `Haruhi storage is set to PostgreSQL, but the environment variable HARUHI_DB_PASSWORD is not set` | The password variable is missing in the server's environment. | Set it where the server process starts. |
 | `Haruhi storage could not migrate schema <schema>: <reason>` | The migration failed; the server does not start. | Check the database, the role's rights and the `jdbc_url`. |
 | `... Schema <schema> is at version <n>, newer than this build's <m>` | A newer Haruhi build migrated this schema. | Run that build or a newer one. |
+| `Failed to initialize pool: <driver message>` | HikariCP could not open the first connection when the mod initialised: the database is unreachable or the credentials are wrong. The game does not start. | Check the host, port, role and password. |
+| `jdbc_url is not a PostgreSQL URL that the driver can parse` | `jdbc_url` is malformed. The game does not start. | Fix the URL. |
+| `jdbc_url socketTimeout must be a whole number of seconds` or `jdbc_url socketTimeout must be from 5 to 2147483 seconds, found <n>` | A `socketTimeout` parameter in `jdbc_url` is out of range. | Fix or remove the parameter. |
+| `Haruhi content configuration <path> is invalid: <problem>; remote content is disabled` or `Haruhi cannot read or write <path>; remote content is disabled` | `config/haruhi-content.json` is invalid or unreadable. The server starts with the Portal fetch off. | Fix the file and restart. |
+| `Could not read <path>, so no content is active` | `config/haruhi/bundle.json` exists but cannot be read. | Check the file's permissions and encoding, then restart or activate a revision. |
+| `Could not read the seed content bundle, so no content is active` | The seed bundle is missing from the jar, which points to a modified jar. | Rebuild the jar, or import and activate a valid bundle. |
+| `The startup content load failed` | The startup load threw an error; the stack trace follows. | Report the error; activate a revision by command meanwhile. |
 | `Active content revision <id> no longer validates, so no content is active:` and a list of problems | The active stored revision fails against this server, for example after a mod that registers a condition type was removed, or a command was taken off the allowlist. | Fix the cause and restart, or `/haruhi content activate` another revision, or `/haruhi content rollback`. |
 | `Content bundle from startup:config/haruhi/bundle.json does not validate, so no content is active:` | `bundle.json` was chosen at startup and failed. | Fix the problems listed and restart, or import and activate a valid bundle. |
 | `Content bundle from startup:seed does not validate, so no content is active:` | The built-in seed failed. A GameTest checks that the seed validates with the built-ins, so this points to a modified jar. | Rebuild the jar, or import and activate a valid bundle. |
@@ -838,12 +855,16 @@ same flags: the last write of each flag wins.
 | `Dialogue flags did not finish writing within 10 seconds at shutdown` | Some flag changes may not have reached storage before the stop. | Check the database's health. |
 | `Could not record a visit to <graph> for <uuid>` | A visit count did not reach storage. | Check the database. |
 | `haruhi:give refers to loot table <id>, which the server does not have; nothing given` | The bundle names a loot table the server's data packs lack. | Add the loot table, or fix the bundle. |
+| `haruhi:give could not write the once flag for <uuid>; <table> not given`, after `Could not write dialogue flag <key> for <uuid>; the cache and storage go back to the previous value` | The `once` flag did not reach storage, so the reward was not given and the flag was rolled back. The player can earn the reward again. | Check the database. |
 | `haruhi:give could not hand <table> to <uuid> before the server stopped; the once flag is set, so grant it by hand` | A reward was waiting for a dead or offline player when the server stopped. | Give the items by hand. |
 | `Dropped the haruhi:give of <table> for <uuid>: the server has stopped after its once flag was stored, so it must be granted by hand` | The flag write finished after the server stopped. | Give the items by hand. |
 | `Dialogue action failed at <graph>#<node>; ending the conversation` | An action threw an error; the stack trace follows. | Fix the action in the bundle, or report the error. |
 | `A router condition failed at <graph>#<node>; ending the conversation` or `A choice condition or provider failed at <graph>#<node>; ending the conversation` | A condition in a router branch's `only_if`, or a choice's condition or provider, threw an error; the stack trace follows. | Fix the condition in the bundle, or report the error to the mod that registers it. |
 | `Dialogue <graph> entered more than 64 nodes in one step; ending the conversation` | Routers or `haruhi:goto` actions loop without showing a node. | Break the loop in the graph. |
 | `Dialogue <graph> would open past 8 graphs in one step; not opened` | A chain of `haruhi:open` actions is longer than 8. | Shorten the chain. |
+| `Dialogue opens <graph>, which is not in the active content; ending the conversation` | A conversation that started before an activation reached a `haruhi:open` of a graph the new content lacks. | Nothing for that conversation; check the new bundle if the graph should be there. |
+| `Cannot open dialogue <graph>: <reason>` | A conversation could not be opened; the reason says why. | Fix what the reason names. |
+| `Haruhi block bindings: skipped an entry that does not decode: <error>` or `Haruhi block bindings: 'bindings' is not a list; no block bindings were loaded` | A dimension's `data/haruhi/block_bindings.dat` is damaged. | Restore the file from a backup, or bind the blocks again. |
 | `haruhi:predicate <id> is not in the server's predicate registry; test is false` | A `haruhi:predicate` names a predicate the server's data packs lack. | Add the predicate, or fix the bundle. |
 | `Haruhi storage closed before this operation ran` | A storage call was queued when storage closed at shutdown. | Nothing, unless it appears while the server is running. |
 | Right-clicking an NPC does nothing | The NPC's profile is missing from the active content, has no `dialogue`, or no content is active. | `/haruhi content status`, then check the profile. |

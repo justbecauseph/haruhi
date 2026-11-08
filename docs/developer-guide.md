@@ -19,8 +19,8 @@ guide](content-guide.md), and the model pipeline in [models and animations](mode
 | Module | Package | Delivers | Uses |
 |---|---|---|---|
 | storage | `town.lampas.haruhi.storage` | `StorageModule`: reads `config/haruhi.json`, builds `InMemoryStorage` or `PostgresStorage`, runs the SQL migrations | nothing |
-| content | `town.lampas.haruhi.content`, `content.model`, `content.remote` | `ContentModule`: bundle parsing and validation, canonical JSON and SHA-256 digest, revisions, the startup load, `/haruhi content`, and the `haruhi:content/*` management methods with the Portal fetch (`config/haruhi-content.json`) | storage, `DialogueRegistries`; binding and npc at use time, for `haruhi:content/bindings` |
-| dialogue | `town.lampas.haruhi.dialogue` and its subpackages, `town.lampas.haruhi.mixin` | `DialogueModule`: sessions, the graph runner, the built-ins, the flag and visit cache with write-behind, payload receivers, the vanilla dialog presenter, `/haruhi dialogue` and `/haruhi flags` | content, storage, npc, network |
+| content | `town.lampas.haruhi.content`, `content.model`, `content.api`, `content.remote` | `ContentModule`: bundle parsing and validation, canonical JSON and SHA-256 digest, revisions, the startup load, `/haruhi content`, and the `haruhi:content/*` management methods with the Portal fetch (`config/haruhi-content.json`) | storage, `DialogueRegistries`; binding and npc at use time, for `haruhi:content/bindings` |
+| dialogue | `town.lampas.haruhi.dialogue` and its subpackages, `town.lampas.haruhi.mixin` (except `JsonRpcParamsLogMixin`, which is content's) | `DialogueModule`: sessions, the graph runner, the built-ins, the flag and visit cache with write-behind, payload receivers, the vanilla dialog presenter, `/haruhi dialogue` and `/haruhi flags` | content, storage, npc, network |
 | npc | `town.lampas.haruhi.npc` | `NpcModule`: the `haruhi:npc` entity type, look and profile syncing, interaction, `/haruhi npc`, `NpcControl` | content, dialogue, network |
 | binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings (per-dimension saved data `BlockBindings`), entity bindings (the persistent attachment `haruhi:binding`, `EntityBindings`), the server-side use callbacks that open a bound graph in place of the vanilla interaction, the block-break listener, `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings`, and the read-only `BindingService` | content, dialogue, npc |
 | network | `town.lampas.haruhi.network` | the payload records and `HaruhiNetworking.registerPayloadTypes` | nothing |
@@ -76,6 +76,9 @@ Listeners run in registration order, which follows the initialisation order.
 | `UseBlockCallback`, `UseEntityCallback` | binding: a bound block or entity opens its graph and the vanilla interaction is skipped (see the [server guide](server-guide.md#binding-behaviour)) |
 | `UseItemCallback` | binding: refuse the held item's use in the tick a binding consumed a use and the next |
 | `PlayerBlockBreakEvents.BEFORE`, `AFTER`, `END_SERVER_TICK` | binding: note a bound block a player is breaking (and the other half of a door, tall plant or bed), then remove its binding once the block is gone. The tick's end catches a creative player breaking a door's upper half, which fires no `AFTER` |
+| `ServerLivingEntityEvents.AFTER_DEATH`, `MOB_CONVERSION`, `ServerEntityEvents.ENTITY_UNLOAD` | binding: `EntityBindingEnds` takes a bound entity's binding off and logs the end once, on a death, a conversion, or an unload whose removal reason destroys the entity |
+| `ServerPlayerEvents.LEAVE`, `SERVER_STOPPED` | binding: `BindingInteractions` forgets the leaving player's consumed uses, and clears them all at the stop |
+| content activation listener | npc: refresh the look of every loaded NPC from the new bundle |
 
 A singleplayer client can start several servers in one JVM. Storage, content and the queues reset on each stop, so the
 next start begins clean.
@@ -116,7 +119,9 @@ next start begins clean.
 - `NpcEntity` is a plain `LivingEntity`. Its look travels as three vanilla `STRING` synced-data entries (model,
   texture, animations), its name as the vanilla custom name, and its scale as the vanilla `scale` attribute, so it needs
   no custom entity-data serializer.
-- The common mixin config `haruhi.mixins.json` holds `DialogueClickMixin`. The client mixin config is empty.
+- The common mixin config `haruhi.mixins.json` holds `DialogueClickMixin` (dialogue) and `JsonRpcParamsLogMixin`
+  (content, which replaces the params of a `haruhi:` call in vanilla's DEBUG log line). The client mixin config is
+  empty.
 
 ### The HUD under the dialogue screen
 
@@ -212,7 +217,9 @@ What the server checks, and in what order:
 The client sends only the session id, the node id and the choice index. Actions never travel to the client.
 
 A player has at most one session. Opening a conversation closes the previous one. A session keeps the bundle and the
-compiled graph it opened with, so a content activation does not change a conversation in progress. Graphs are compiled
+compiled graph it opened with, so a content activation does not change a conversation in progress, except that a
+`haruhi:open` reached after the activation opens the graph from the active content, or ends the conversation when the
+active content lacks it. Graphs are compiled
 on first use, and compiled again on their first use after each activation.
 
 The node's `animation` is played by the conversing player's own client on the speaker entity, from the payload. The
@@ -220,7 +227,7 @@ The node's `animation` is played by the conversing player's own client on the sp
 `haruhi:npc`; on any other interlocutor, such as a bound villager, they do nothing.
 
 A bound block or entity goes through the same service: `BindingInteractions` calls `openAt` with an anchor on the
-block's centre (8 blocks) or `open` with the entity as the interlocutor, each with a `DialogueSpeaker` made of the
+block's centre (8 blocks, or the player's block reach plus 3 when that is longer, up to 64) or `open` with the entity as the interlocutor, each with a `DialogueSpeaker` made of the
 binding's speaker profile and the block's or entity's name. The Fabric use callbacks run before vanilla, so returning a
 non-`PASS` result skips the container, trade screen or item use. The client does not know the bindings: when its own
 guess of the block or entity use passes, it goes on to send a use of the held item, which `UseItemCallback` refuses in
@@ -281,7 +288,8 @@ dependencies {
 }
 ```
 
-Declare `"depends": { "haruhi": ">=0.2.0" }` in your `fabric.mod.json`. To build against a checkout of the Haruhi
+Declare `"depends": { "haruhi": ">=0.3.0" }` in your `fabric.mod.json`. `>=0.2.0` is enough for a mod that calls
+none of the 0.3.0 additions, `HaruhiServices.bindings()` and the npc service's list of loaded NPCs. To build against a checkout of the Haruhi
 repository instead, for a change that is not published yet, add `includeBuild('../haruhi')` to your
 `settings.gradle`: Gradle substitutes the dependency with that build. [Alina](https://github.com/justbecauseph/alina)
 does both, and builds against the published jar when no checkout sits beside it.
@@ -289,8 +297,10 @@ does both, and builds against the published jar when no checkout sits beside it.
 The jar also holds the bundle schema as `haruhi/bundle.schema.json`, so a mod that publishes a schema for its own
 bundle extension can check it against the Haruhi version it depends on.
 
-The API is in `town.lampas.haruhi.dialogue.api`. It also uses `ContentBundle` and `FlagNamespace` from
-`town.lampas.haruhi.content.model` and `FlagKey` from `town.lampas.haruhi.storage`.
+The dialogue API is in `town.lampas.haruhi.dialogue.api`, and the bundle extension API (`ContentExtensions`,
+`ContentExtensionKey`, `ContentExtensionType`, `ExtensionContext`) in `town.lampas.haruhi.content.api`. They also use
+`ContentBundle` and `FlagNamespace` from `town.lampas.haruhi.content.model` and `FlagKey` from
+`town.lampas.haruhi.storage`.
 
 ### Registering types
 
@@ -500,9 +510,9 @@ should be immutable, because every reader of the active bundle shares it.
 
 | Call | Does |
 |---|---|
-| `HaruhiServices.dialogue().open(player, graphId, interlocutor)` | opens a graph of the active content; `interlocutor` may be null. Returns false when the graph is not in the active content. Closes the player's current conversation. |
-| `HaruhiServices.dialogue().openAt(player, graphId, anchor)` | opens a graph tied to a place: a `DialogueAnchor(dimension, position, maxDistance)`, with `maxDistance` above 0 and at most 64 blocks. The conversation ends when the player changes dimension or moves farther than `maxDistance` from `position`, and a pick sent from farther away ends it without running. A graph chained with `haruhi:open` keeps the anchor. Use it for a block such as a notice board. |
-| `open(player, graphId, interlocutor, speaker)`, `openAt(player, graphId, anchor, speaker)` | the same, with a `DialogueSpeaker(profile, name)` for the nodes that name no `speaker`: they show the profile's name and portrait, else `name`, and the interlocutor is drawn as their headshot. `DialogueSpeaker.of(Optional.empty(), block.getName())` is what a block binding passes. The three-argument forms pass `DialogueSpeaker.NONE`, where a `haruhi:npc` interlocutor speaks with its own profile. A chained `haruhi:open` keeps the speaker. |
+| `HaruhiServices.dialogue().open(player, graphId, interlocutor)` | opens a graph of the active content; `interlocutor` may be null. When it opens, it closes the player's current conversation. Returns false, leaving the current conversation running, when the active content lacks the graph. |
+| `HaruhiServices.dialogue().openAt(player, graphId, anchor)` | opens a graph tied to a place: a `DialogueAnchor(dimension, position, maxDistance)`, with `maxDistance` above 0 and at most 64 blocks. The conversation ends when the player changes dimension or moves farther than `maxDistance` from `position`, and a pick sent from farther away ends it without running. A graph chained with `haruhi:open` keeps the anchor. Also returns false, without closing anything, when the player is outside the anchor at open time. Use it for a block such as a notice board. |
+| `open(player, graphId, interlocutor, speaker)`, `openAt(player, graphId, anchor, speaker)` | the same, with a `DialogueSpeaker(profile, name)` for the nodes that name no `speaker`: they show the profile's name and portrait, else `name`, and the interlocutor is drawn as their headshot. A block binding passes `DialogueSpeaker.of(<the binding's speaker profile>, block.getName())`. The three-argument forms pass `DialogueSpeaker.NONE`, where a `haruhi:npc` interlocutor speaks with its own profile. A chained `haruhi:open` keeps the speaker. |
 | `HaruhiServices.dialogue().close(player)` | ends the conversation, or cancels one waiting for the player's flags |
 | `HaruhiServices.dialogue().isInDialogue(player)` | true while a conversation is open or waiting for flags |
 | `HaruhiServices.content().active()` | the active `ContentBundle`; `ContentBundle.EMPTY` before any is active |
@@ -526,7 +536,8 @@ repository:
 3. Build it in `StorageModule.build`, and run any blocking setup the way `PostgresStorage.migrate()` runs, from
    `StorageModule.start` at `SERVER_STARTING`.
 4. Subclass `HaruhiStorageContractTest` (in `src/test/java/town/lampas/haruhi/storage/`) with a `createStorage()` that
-   returns a fresh, empty instance. `InMemoryStorageTest` and `PostgresStorageTest` do the same.
+   returns a fresh, empty instance. `InMemoryStorageTest` and `PostgresStorageTest` do the same. Add the backend's
+   `backendName()` to the names `theBackendNamesItself` accepts, which are only `memory` and `postgresql`.
 
 The contract, from `HaruhiStorage` and `StorageSupport`:
 
@@ -540,7 +551,8 @@ The contract, from `HaruhiStorage` and `StorageSupport`:
 | `storeRevision(digest, json, author, at)` | store a new inactive revision; for a digest already stored, return the existing revision instead |
 | `loadRevision(id)`, `activeRevision()` | return the revision, or empty |
 | `activateRevision(id, actor, at)` | mark that revision active and every other one inactive, recording the actor and time; fail for an unknown id and leave the previous active revision as it was |
-| `listRevisions(limit)` | return summaries newest first, by creation time and then id; fail for a limit below 1 |
+| `listRevisions(before, limit)` | return at most `limit` summaries, newest (highest id) first; with `before`, only ids below it; fail for a limit below 1. `listRevisions(limit)` is a default method that passes no `before`. |
+| `backendName()` | return the backend's name for status reports (`haruhi:content/status` `storage`) |
 | `close()` | stop the backend; complete or fail every future already handed out |
 
 Times are kept to the microsecond, the precision of PostgreSQL's `timestamptz`. `characterId` is the player's UUID.
@@ -575,7 +587,9 @@ Minecraft server. `test` depends on `classes` and passes the compiled main class
 - `content/`: the validator, digest, bundle files, the startup choice, commands, the content service and the
   activation order. `BundleSchemaTest` checks `docs/bundle.schema.json` against the bundle reader: the same keys at
   every level, the same verdict on a set of malformed bundles, and acceptance of the seed, the GameTest fixtures and
-  every full bundle in `AGENTS.md`, `README.md` and `docs/`.
+  every full bundle in `AGENTS.md`, `README.md` and `docs/`. `BundleExtensionsTest` covers bundle extensions.
+- `content/remote/`: the management methods' param checks and log redaction, the request table, the Portal fetcher,
+  `config/haruhi-content.json`, export text chunks and the bindings pages.
 - `dialogue/`: the dialogue config, built-in parsing and evaluation, commands, the flag cache and write-behind, the
   presenters and the graph runner. `BuiltinSchemaTest` checks that the schema lists exactly the registered `haruhi:`
   conditions and actions and gives the same verdict as their parsers on a set of argument cases.
@@ -642,7 +656,10 @@ resolve against the project directory. What it writes and how it converts is in
 
 ```
 build.gradle, gradle.properties, settings.gradle   Loom build and pinned versions
+README.md, LICENSE                                 overview and the MPL-2.0 text
 AGENTS.md                                          brief for coding agents
+docs/                                              these guides and bundle.schema.json (shipped in the jar, read by the schema tests)
+.github/workflows/release.yml                      publishes to the JustBecause Maven repository on a GitHub release
 src/main/java/town/lampas/haruhi/
   Haruhi.java                  main entrypoint, initialisation order
   api/HaruhiServices.java      service getters and setters
@@ -650,6 +667,7 @@ src/main/java/town/lampas/haruhi/
   content/                     bundle reading and validation, digest, revisions, startup load, /haruhi content
   content/model/               the immutable bundle records: ContentBundle, NpcProfile, DialogueGraph, ...
   content/api/                 bundle extensions: ContentExtensions, ContentExtensionType, ExtensionContext
+  content/remote/              the haruhi:content/* management methods: ContentRpc, ContentMethods, ContentRequests, BundleFetcher
   dialogue/                    DialogueModule, DialogueSessions, DialogueConfig
   dialogue/api/                the extension API: DialogueRegistries, ParseContext, DialogueContext, types
   dialogue/builtin/            the built-in conditions and actions
@@ -657,7 +675,7 @@ src/main/java/town/lampas/haruhi/
   dialogue/flags/              per-player cache, write-behind, ordered writes, DurableFlags
   dialogue/presenter/          visual-novel payloads and vanilla dialogs
   dialogue/runtime/            compiled graphs, GraphRunner, sessions
-  mixin/                       DialogueClickMixin
+  mixin/                       DialogueClickMixin, JsonRpcParamsLogMixin
   network/                     payload records and HaruhiNetworking
   npc/                         NpcEntity, NpcLook, NpcControl, /haruhi npc
   binding/                     block and entity bindings, their use callbacks, /haruhi bind, unbind and bindings
