@@ -1,4 +1,6 @@
 {
   "entity.haruhi.npc": "NPC",
-  "screen.haruhi.dialogue.continue": "Space or click to continue"
+  "screen.haruhi.dialogue.continue": "Space or click to continue",
+  "screen.haruhi.dialogue.more": "Space or click for more",
+  "screen.haruhi.dialogue.page": "%s/%s"
 }

@@ -130,6 +130,25 @@ Known gap: Fabric API's `INFO_BAR` wraps only `ContextualBar.extractBackground`.
 markers in `LocatorBar.extractRenderState`, which has no HUD element, so the markers still draw under the box. The
 experience and jump bars draw nothing in that step, so they are fully hidden.
 
+### Pages in the dialogue screen
+
+The client pages a node's text; the server and the payloads know nothing of pages. `DialogueLayout` caps the box at
+40% of the screen's height (but never below a full headshot with its padding) and below the room kept for up to
+three choice rows, and gives `pageLines`, the lines the box holds. `DialogueScreen` wraps the text with `font.split` and
+hands the lines' code points to `TextPages`, which splits them into pages of whole lines, ending a page early at a
+blank line in its lower half and starting no later page on a blank line. Each page types out with its own
+`Typewriter`. A press on a finished page turns to the next one locally; only a press on the last page sends
+`DialogueChoicePayload.CONTINUE`, and choices are drawn and pickable only on the last page. Minecraft passes key
+repeats to `keyPressed` without marking them, so the screen keeps the advance keys that are down (`keyReleased`
+takes them off) and lets a repeat only finish the typing.
+
+Wrapping drops the space or line break at each break, so a character offset is only valid for one wrap. When the
+screen lays out again (`init()` on a resize or GUI scale change, or the speaker loading or unloading, which adds or
+removes the 3D headshot), it carries the start of the current page and how far the text has been shown as counts of
+non-whitespace characters, which do not depend on the wrap, and maps them back with `TextPages.charOfGlyph`. Every
+node payload starts on the first page, the node on screen sent again included: the payload does not tell a choice that
+leads back to its own node from a refused pick, and the first must repeat the whole speech.
+
 ## A conversation from click to close
 
 ```mermaid
@@ -609,6 +628,8 @@ The `gametest` source set and the `runGameTest` task come from `fabricApi { conf
 
 The visual-novel screen, the HUD changes and the GeckoLib renderer have unit tests for their arithmetic, but no client
 GameTests. Check them by hand in `runClient`: open a world, spawn an NPC with `/haruhi npc spawn`, and talk to it.
+For pages, give a node a text of several paragraphs, then check the indicator, that Space turns pages with no wait,
+that the choices appear only on the last page, and that a resize or GUI scale change mid-speech keeps the place.
 
 ### The bbmodel tool source set
 

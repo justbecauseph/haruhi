@@ -1,9 +1,11 @@
 package town.lampas.haruhi.client.dialogue;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -29,15 +31,17 @@ import town.lampas.haruhi.network.DialogueNodePayload;
  * the speaker: the node's 2D portrait when it names one that exists (stretched to the square, so portrait textures
  * should be square), else a 3D render of the speaker's head and shoulders when the speaker is loaded, else nothing, and
  * the text then starts at the box's left padding. To the right of the headshot are the speaker's name, a divider and
- * the text ({@link DialogueLayout}). The text types out at the configured speed; a click, Space or Enter finishes it,
- * and once it is finished a further press continues when the node has no choices. Choices stack above the box on the
- * right, and the number keys or a click pick them once the text is finished. When more choices are offered than fit,
+ * the text ({@link DialogueLayout}). Text with more lines than the box holds is shown in pages ({@link TextPages}), with
+ * a page indicator at the bottom right; turning a page does not ask the server. Each page types out at the configured
+ * speed; a click, Space or Enter finishes it, and once it is finished a further press turns to the next page, or on the
+ * last page continues when the node has no choices. Choices stack above the box on the right once the last page is
+ * shown, and the number keys or a click pick them once it is finished. When more choices are offered than fit,
  * the list scrolls with the mouse wheel or the Up and Down keys, and the box leaves room above it for at least three of
  * them. The screen draws no background, so the world stays in view behind it; {@link DialogueHud} hides the HUD
  * elements the box would cover and moves the chat above the box ({@link #boxTop()}).
  *
- * <p>Input only sends the session id, node id and choice index; the server checks each one. Escape sends a dismiss and
- * closes the screen.
+ * <p>Input only sends the session id, node id and choice index; the server checks each one, and knows nothing of pages.
+ * Escape sends a dismiss and closes the screen.
  */
 public final class DialogueScreen extends Screen {
     private static final int MARGIN = DialogueLayout.MARGIN;
@@ -49,6 +53,8 @@ public final class DialogueScreen extends Screen {
     private static final int CHOICE_INSET = 6;
     /** The space between the lowest choice row and the box. */
     private static final int CHOICE_GAP = 8;
+    /** The space between the page indicator and the hint left of it. */
+    private static final int INDICATOR_GAP = 8;
 
     private static final int BOX_FILL = 0xD0101018;
     private static final int BOX_EDGE = 0xFF8A7F6A;
@@ -69,12 +75,25 @@ public final class DialogueScreen extends Screen {
     private final double textSpeed;
     private DialogueNodePayload node;
     private int sessionId;
+    /** Types out the current page from {@link #typeFrom}. */
     private Typewriter typewriter;
     /** When a choice or continue was last sent, or -1. Input waits for the next node, up to {@link #AWAIT_TIMEOUT_MILLIS}. */
     private long awaitingSinceMillis = -1L;
+    /** The advance keys (Space, Enter, keypad Enter) pressed and not yet released, to tell a key repeat from a press. */
+    private final Set<Integer> heldAdvanceKeys = new HashSet<>();
 
     private List<FormattedCharSequence> lines = List.of();
-    private int totalChars;
+    /** The pages of {@link #lines}, from the last layout; null before the first layout of the node. */
+    private TextPages pages;
+    /** The page on screen, from 0. */
+    private int page;
+    /** The character offset on the current page where its typing starts; the characters before it show at once. */
+    private int typeFrom;
+    /**
+     * How far the text has been shown, as a character offset: no less than the end of the typing on any page shown so
+     * far. A page that starts before it shows that much at once, which matters after a resize re-wraps the text.
+     */
+    private int revealed;
     private DialogueLayout box;
     private int lineHeight;
     /** The node's portrait when its texture exists, from the last layout. */
@@ -121,13 +140,18 @@ public final class DialogueScreen extends Screen {
         return node == null ? OptionalInt.empty() : node.speakerEntityId();
     }
 
-    /** Replaces the shown node with the next one of the same conversation, and types it out from the start. */
+    /**
+     * Replaces the shown node with the next one of the same conversation, and types it out from its first page. That
+     * includes the node on screen sent again, whether a choice leads back to it or the server refused a pick: the payload
+     * does not say which, and a node that repeats itself should be read again from the start.
+     */
     public void showNode(DialogueNodePayload payload) {
         this.node = payload;
         this.sessionId = payload.sessionId();
         this.awaitingSinceMillis = -1L;
-        this.typewriter = new Typewriter(textSpeed, Util.getMillis());
         this.choiceScroll = 0;
+        this.pages = null;
+        this.typewriter = new Typewriter(textSpeed, Util.getMillis());
         layout();
     }
 
@@ -137,12 +161,24 @@ public final class DialogueScreen extends Screen {
     }
 
     /**
-     * Works out the box, the headshot frame, the wrapped lines and the text's character count for the current window
-     * size, the node, and whether there is a headshot to show.
+     * Works out the box, the headshot frame, the wrapped lines and their pages for the current window size, the node, and
+     * whether there is a headshot to show. When the node was laid out before (a resize, a GUI scale change, a headshot
+     * that appears or goes), the reader stays at the same place in the text: on the page that holds the first character
+     * of the page they were on, with what they had been shown still shown and the typing going on from there.
      */
     private void layout() {
         if (node == null || width <= 0 || height <= 0) {
             return;
+        }
+        long now = Util.getMillis();
+        boolean relayout = pages != null;
+        int pageStartGlyphs = 0;
+        int revealedGlyphs = 0;
+        if (relayout) {
+            // Counts of non-whitespace characters, which do not change when the text wraps to another width.
+            revealed = Math.max(revealed, visibleEnd(now));
+            pageStartGlyphs = pages.glyphsBefore(pages.page(page).startChar());
+            revealedGlyphs = pages.glyphsBefore(revealed);
         }
         portrait = node.portrait().filter(NpcLookAssets::resourceExists);
         headshotLaidOut = portrait.isPresent() || speakerEntity() != null;
@@ -153,12 +189,33 @@ public final class DialogueScreen extends Screen {
         box = DialogueLayout.compute(width, height, headshotLaidOut, hasName(), font.lineHeight, lineHeight,
                 choiceRoom, textWidth -> font.split(text, textWidth).size());
         lines = font.split(text, box.textWidth());
-        totalChars = countCharacters(lines);
+        pages = TextPages.paginate(TextPages.codepoints(lines), box.pageLines());
+        if (relayout) {
+            page = pages.pageAt(pages.charOfGlyph(pageStartGlyphs));
+            revealed = pages.charOfGlyph(revealedGlyphs);
+        } else {
+            page = 0;
+            revealed = 0;
+        }
+        startPage(now);
+    }
+
+    /** Starts typing the current page at {@code now}, from where the text has been shown up to. */
+    private void startPage(long now) {
+        TextPages.Page current = pages.page(page);
+        typeFrom = Math.clamp(revealed, current.startChar(), current.endChar());
+        typewriter = new Typewriter(textSpeed, now);
+    }
+
+    /** The character offset the current page has been typed up to at {@code now}. */
+    private int visibleEnd(long now) {
+        int end = pages.page(page).endChar();
+        return typeFrom + typewriter.visibleChars(now, Math.max(0, end - typeFrom));
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        if (node == null || box == null) {
+        if (node == null || box == null || pages == null) {
             return;
         }
         LivingEntity speaker = speakerEntity();
@@ -166,15 +223,15 @@ public final class DialogueScreen extends Screen {
         if (portrait.isEmpty() && (speaker != null) != headshotLaidOut) {
             layout();
         }
-        int visible = typewriter.visibleChars(Util.getMillis(), totalChars);
-        boolean textDone = visible >= totalChars;
+        int visible = visibleEnd(Util.getMillis());
+        boolean pageDone = visible >= pages.page(page).endChar();
 
         drawBox(graphics);
         drawHeadshot(graphics, speaker);
         drawName(graphics);
         drawText(graphics, visible);
         drawChoices(graphics, mouseX, mouseY);
-        drawContinueHint(graphics, textDone);
+        drawFooter(graphics, pageDone);
     }
 
     /**
@@ -232,24 +289,24 @@ public final class DialogueScreen extends Screen {
                 BOX_EDGE);
     }
 
-    /** Draws the first {@code visible} characters of the wrapped lines, top to bottom. */
+    /** Draws the current page's lines top to bottom, up to the character offset {@code visible}, with their styles. */
     private void drawText(GuiGraphicsExtractor graphics, int visible) {
-        int remaining = visible;
+        TextPages.Page current = pages.page(page);
         int y = box.textY();
-        for (FormattedCharSequence line : lines) {
-            int take = Math.min(codepoints(line), remaining);
+        for (int line = current.firstLine(); line < current.endLine(); line++) {
+            int take = Math.clamp(visible - pages.lineStart(line), 0, pages.lineLength(line));
             if (take > 0) {
-                graphics.text(font, prefix(line, take), box.textX(), y, TEXT);
+                graphics.text(font, prefix(lines.get(line), take), box.textX(), y, TEXT);
             }
-            remaining -= take;
             y += lineHeight;
         }
     }
 
+    /** The choices, once the last page is on screen. */
     private void drawChoices(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
         choiceRows.clear();
         List<ChoiceView> choices = node.choices();
-        if (choices.isEmpty()) {
+        if (choices.isEmpty() || !onLastPage()) {
             return;
         }
         int widest = 0;
@@ -312,22 +369,44 @@ public final class DialogueScreen extends Screen {
         choiceScroll = Math.max(0, choiceScroll + rows);
     }
 
-    private void drawContinueHint(GuiGraphicsExtractor graphics, boolean textDone) {
-        if (!textDone || !node.choices().isEmpty()) {
+    /**
+     * The bottom right of the box: the page indicator when the text has more than one page, and left of it, once the page
+     * is finished, the hint for what a press does next: turn the page, or on the last page continue when there are no
+     * choices.
+     */
+    private void drawFooter(GuiGraphicsExtractor graphics, boolean pageDone) {
+        int right = box.textRight();
+        if (pages.size() > 1) {
+            Component indicator = Component.translatable("screen.haruhi.dialogue.page", page + 1, pages.size());
+            int indicatorWidth = font.width(indicator);
+            graphics.text(font, indicator, right - indicatorWidth, box.hintY(), HINT);
+            right -= indicatorWidth + INDICATOR_GAP;
+        }
+        if (!pageDone) {
             return;
         }
-        Component hint = Component.translatable("screen.haruhi.dialogue.continue");
-        graphics.text(font, hint, box.textRight() - font.width(hint), box.hintY(), HINT);
+        Component hint;
+        if (!onLastPage()) {
+            hint = Component.translatable("screen.haruhi.dialogue.more");
+        } else if (node.choices().isEmpty()) {
+            hint = Component.translatable("screen.haruhi.dialogue.continue");
+        } else {
+            return;
+        }
+        graphics.text(font, hint, right - font.width(hint), box.hintY(), HINT);
     }
 
     @Override
     public boolean keyPressed(KeyEvent event) {
         int key = event.key();
         if (key == GLFW.GLFW_KEY_SPACE || key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
-            advance();
+            // Minecraft passes key repeats here as presses, without saying which they are; a press of a key that has
+            // not been released since its last press is a repeat.
+            boolean repeat = !heldAdvanceKeys.add(key);
+            advance(repeat);
             return true;
         }
-        if ((key == GLFW.GLFW_KEY_UP || key == GLFW.GLFW_KEY_DOWN) && !node.choices().isEmpty()) {
+        if ((key == GLFW.GLFW_KEY_UP || key == GLFW.GLFW_KEY_DOWN) && choicesShown()) {
             scrollChoices(key == GLFW.GLFW_KEY_UP ? -1 : 1);
             return true;
         }
@@ -340,6 +419,12 @@ public final class DialogueScreen extends Screen {
     }
 
     @Override
+    public boolean keyReleased(KeyEvent event) {
+        heldAdvanceKeys.remove(event.key());
+        return super.keyReleased(event);
+    }
+
+    @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return super.mouseClicked(event, doubleClick);
@@ -348,7 +433,7 @@ public final class DialogueScreen extends Screen {
         if (position >= 0 && isTextComplete()) {
             pick(position);
         } else {
-            advance();
+            advance(false);
         }
         return true;
     }
@@ -356,7 +441,7 @@ public final class DialogueScreen extends Screen {
     /** The wheel scrolls the choice list. Scrolling a list that fits does nothing, because each frame clamps it. */
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (scrollY != 0.0 && node != null && !node.choices().isEmpty()) {
+        if (scrollY != 0.0 && choicesShown()) {
             scrollChoices(scrollY > 0.0 ? -1 : 1);
             return true;
         }
@@ -377,13 +462,27 @@ public final class DialogueScreen extends Screen {
         return false;
     }
 
-    /** Finishes the typing, or continues when the text is finished and the node has no choices. */
-    private void advance() {
-        if (node == null || isAwaitingServer()) {
+    /**
+     * Finishes typing the page; or turns to the next page when the page is finished, without asking the server; or, on
+     * the last page, continues when the node has no choices. A key repeat only finishes typing, so holding the key down
+     * does not skim through pages or nodes the player has not read.
+     */
+    private void advance(boolean repeat) {
+        if (node == null || pages == null || isAwaitingServer()) {
             return;
         }
-        if (!isTextComplete()) {
+        long now = Util.getMillis();
+        if (visibleEnd(now) < pages.page(page).endChar()) {
             typewriter.complete();
+            return;
+        }
+        if (repeat) {
+            return;
+        }
+        if (!onLastPage()) {
+            revealed = Math.max(revealed, visibleEnd(now));
+            page++;
+            startPage(now);
             return;
         }
         if (node.choices().isEmpty()) {
@@ -426,8 +525,18 @@ public final class DialogueScreen extends Screen {
         return -1;
     }
 
+    /** Whether the last page is on screen and typed out in full, which is when choices can be picked. */
     private boolean isTextComplete() {
-        return typewriter.isComplete(Util.getMillis(), totalChars);
+        return onLastPage() && visibleEnd(Util.getMillis()) >= pages.page(page).endChar();
+    }
+
+    private boolean onLastPage() {
+        return pages != null && page == pages.size() - 1;
+    }
+
+    /** Whether the choice list is on screen: the node has choices and its last page is shown. */
+    private boolean choicesShown() {
+        return node != null && !node.choices().isEmpty() && onLastPage();
     }
 
     private boolean hasName() {
@@ -442,23 +551,6 @@ public final class DialogueScreen extends Screen {
         }
         Entity entity = Minecraft.getInstance().level.getEntity(id.getAsInt());
         return entity instanceof LivingEntity living ? living : null;
-    }
-
-    private static int countCharacters(List<FormattedCharSequence> lines) {
-        int total = 0;
-        for (FormattedCharSequence line : lines) {
-            total += codepoints(line);
-        }
-        return total;
-    }
-
-    private static int codepoints(FormattedCharSequence line) {
-        int[] count = {0};
-        line.accept((index, style, codepoint) -> {
-            count[0]++;
-            return true;
-        });
-        return count[0];
     }
 
     /** The first {@code limit} characters of {@code line}, with their styles. */
