@@ -87,8 +87,9 @@ needs nothing else to use PostgreSQL.
 
 1. Put `haruhi-0.3.0.jar` and Fabric API in the server's `mods/` folder. Give each player the same two jars, plus
    GeckoLib 5.5.5, for their client's `mods/` folder.
-2. Start the server. The first start writes `config/haruhi.json` (in-memory storage) and `config/haruhi-dialogue.json`
-   (no command actions allowed), and activates the seed bundle built into the jar. The log shows:
+2. Start the server. The first start writes `config/haruhi.json` (in-memory storage), `config/haruhi-dialogue.json`
+   (no command actions allowed) and `config/haruhi-content.json` (the Portal fetch off), and activates the seed bundle
+   built into the jar. The log shows:
 
    ```
    Haruhi storage: in-memory backend. Flags, visits and content revisions are lost when the server stops.
@@ -128,7 +129,8 @@ PostgreSQL before players depend on them: see [Storage configuration](docs/serve
 | [Models and animations](docs/models-and-animations.md) | model makers | Blockbench models, the `.bbmodel` converter, textures, animations, portraits |
 | [Developer guide](docs/developer-guide.md) | mod developers | architecture, network payloads, the extension API, building and testing, repository layout |
 
-`AGENTS.md` is the brief for coding agents working in this repository.
+`AGENTS.md` is the brief for coding agents working in this repository. [Alina](https://github.com/justbecauseph/alina)
+builds the Maraha Guild and an achievement system on Haruhi, through its extension API.
 
 ## Licence
 

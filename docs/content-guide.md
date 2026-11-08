@@ -31,7 +31,9 @@ Every `/haruhi` command on this page needs permission level 2 (game masters).
    live: the reply names the revision id and the command to activate it. Importing content that matches a stored
    revision, ignoring whitespace and key order, returns that revision.
 4. `/haruhi content activate <id>` makes the revision live. New conversations use it; a conversation already open
-   finishes on the revision it started with. Loaded NPCs pick up their new name, look and scale at once.
+   finishes on the revision it started with, except that a `haruhi:open` it reaches opens the graph from the live
+   revision, or ends the conversation when the live revision lacks that graph. Loaded NPCs pick up their new name,
+   look and scale at once.
 5. `/haruhi npc spawn <profile> [pos]` places an NPC with a profile from the live content. At another position it
    turns to face you; without `pos` it spawns where you stand, facing the opposite way to you. Right-click it to talk.
 
@@ -48,6 +50,7 @@ Other commands that help while writing:
 | `/haruhi dialogue open <graph> [targets]` | Opens a graph for players without an NPC, which is a quick way to test one graph. |
 | `/haruhi dialogue close [targets]` | Ends the players' conversations. |
 | `/haruhi bind block <pos> <graph> [<speaker>]`, `/haruhi bind entity <targets> <graph> [<speaker>]` | Binds a graph to a block or an entity, so using it opens the graph. See [Bindings](#bindings-blocks-and-entities). |
+| `/haruhi unbind block <pos>`, `/haruhi unbind entity <targets>` | Removes a block's or the selected entities' bindings. |
 | `/haruhi bindings [all]` | Lists bindings nearby, or all of them, and marks those whose graph or speaker profile the live content lacks. |
 | `/haruhi flags get <player> <namespace> <flag>` | Shows a player's flag value. |
 | `/haruhi flags set <player> <namespace> <flag> [value]` | Sets a flag; `value` defaults to 1. |
@@ -72,7 +75,7 @@ server fetches each bundle from the Portal, so the bundle's size is not limited 
   problem at its place, from the `<where>` part of Haruhi's `<where>: <problem>` (the forms are in
   [Validation](#validation)). A refused bundle lists its first 500 problems and the total.
 - **Put live**, for admins, checks again, then imports the bundle with `haruhi:content/import`, which stores a revision
-  with the writer as author, and activates it with `haruhi:content/activate`, with the admin as the activator. Content
+  whose author is the writer followed by ` (request <id>)`, and activates it with `haruhi:content/activate`, with the admin as the activator. Content
   that is already stored returns the existing revision, so sending the same bundle twice stores one revision.
 - **Versions** are Haruhi's revision ids. Going back to a version activates that revision by id; the Portal never
   sends `/haruhi content rollback`, which flips between the last two activated revisions.
@@ -119,8 +122,8 @@ Rules that apply everywhere in the file:
   exactly one entity shows nothing. Selector and nbt components run each time the node is shown, so keep their
   selectors narrow. The entries of a choice provider are shown as the providing mod gives them, unresolved.
 - Keys are snake_case, and an unknown key is an error at every level: bundle, NPC, graph, node, choice, router branch
-  and the arguments of every condition and action. A misspelt `only_if` fails validation instead of silently removing
-  a gate.
+  and the arguments of every built-in condition and action. A misspelt `only_if` fails validation instead of silently
+  removing a gate. Types that other mods register decide for themselves which arguments they refuse.
 - Two keys in one section that parse to the same id, such as `guard` and `minecraft:guard`, are an error.
 - Exact duplicate keys are not detected. The JSON parser keeps the last of two identical keys in one object (two
   `"text"` keys in a node, or the same NPC key twice), and validation sees only that one.
@@ -185,7 +188,8 @@ What the NPC entity does:
 - Its hitbox is 0.6 x 1.8 blocks times `scale`, whatever the size of its model. Players must click inside that box to
   talk to it.
 - Right-clicking it with the main hand turns it to face the player and opens its `dialogue`.
-- An NPC whose profile is missing from the live content draws with the default look and does nothing when clicked.
+- An NPC whose profile is missing from the live content draws with the default look, has the profile id as its
+  name, and does nothing when clicked.
 
 ## Dialogue graphs and nodes
 
@@ -329,7 +333,7 @@ A condition or action is an object whose `type` names a registered type; its oth
 ```
 
 The built-in types are listed in [Built-in conditions](#built-in-conditions) and [Built-in actions](#built-in-actions).
-Each type refuses arguments it does not take.
+Each built-in type refuses arguments it does not take; a type from another mod follows its own rules.
 
 ## How a conversation runs
 
@@ -387,7 +391,8 @@ A conversation also ends when:
 
 - the player presses Escape, or Cancel in the vanilla dialog;
 - the NPC or bound entity is more than 8 blocks away, dead or unloaded, or in another dimension;
-- for a bound block, the player moves more than 8 blocks from it or changes dimension;
+- for a bound block, the player moves more than 8 blocks from it (or their block reach plus 3, when that is longer, up
+  to 64) or changes dimension;
 - the player dies, respawns or leaves;
 - a condition, action or provider fails while running (the server logs the error);
 - more than 64 nodes are entered in one step, which catches loops of routers and jumps;
@@ -473,7 +478,7 @@ not check that predicates, items, item tags or advancements exist; a wrong id ma
 | `haruhi:open` | `graph`: a graph of the same bundle | after the current actions, ends this conversation and opens `graph` with the same NPC, or the same bound block or entity and its speaker | `{"type": "haruhi:open", "graph": "shop:mira_quest"}` |
 | `haruhi:animation` | `animation`: an animation name | the NPC being talked to plays the animation, for every player whose client tracks it and has Haruhi and GeckoLib. Does nothing in a conversation without an NPC | `{"type": "haruhi:animation", "animation": "wave"}` |
 | `haruhi:sound` | `sound`: sound event id; `volume`: not negative, default 1; `pitch`: above 0, default 1 | plays the sound at the player's position, in the master category. Players nearby hear it too. The id is not checked | `{"type": "haruhi:sound", "sound": "minecraft:entity.item.pickup"}` |
-| `haruhi:message` | `text`: text component | sends the text to the player's chat | `{"type": "haruhi:message", "text": {"text": "Mira hums to herself.", "italic": true}}` |
+| `haruhi:message` | `text`: text component | sends the text to the player's chat as written: `score`, `selector` and `nbt` components in it are not resolved | `{"type": "haruhi:message", "text": {"text": "Mira hums to herself.", "italic": true}}` |
 | `haruhi:give` | `loot_table`: loot table id; `once`: `{"namespace", "flag"}`, required | gives the loot table's items once per character. See below | `{"type": "haruhi:give", "loot_table": "minecraft:gameplay/hero_of_the_village/librarian_gift", "once": {"namespace": "shop:mira", "flag": "got_book"}}` |
 | `haruhi:command` | `command`: a command, with or without the leading `/` | runs the command as the player. Only allowlisted commands validate. See below | `{"type": "haruhi:command", "command": "clear @s minecraft:emerald 5"}` |
 
@@ -557,9 +562,11 @@ portrait ids; animation names; sound ids; item and item tag ids; loot tables, pr
 back or fails soft at run time, as the tables above say.
 
 Each problem is one line, `<where>: <problem>`. `<where>` is `bundle`, `npc <id>`, `<graph>`, `<graph>#<node>`,
-`<graph>#<node>, choice <n>` or `<graph>#<node>, random entry <n>`. Problems with the arguments of a condition or
-action name the node and the type, but not the choice or random entry number. A JSON syntax error is reported as
-`bundle: not valid JSON: <parser message>`, followed by a second line with the parser's troubleshooting link. Some
+`<graph>#<node>, choice <n>` or `<graph>#<node>, random entry <n>`, and for a bundle extension `extension <id>` or a
+location the extension's parser names, which starts with it (Alina writes `extension alina:guild, commission <id>`).
+Problems with the arguments of a condition or action name the node and the type, but not the choice or random entry
+number. A JSON syntax error is reported as `bundle: not valid JSON: <parser message>`, usually followed by a second
+line with the parser's troubleshooting link; a file that ends early gives the first line only. Some
 messages:
 
 | Mistake | Message |

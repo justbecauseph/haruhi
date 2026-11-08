@@ -150,7 +150,8 @@ or left out on a small window. It picks, in order:
    that texture. A node portrait the client lacks does not fall back to the profile's. It is stretched to the square,
    so make portraits square;
 2. a 3D render of the speaker's head and shoulders, when the speaker is the NPC or bound entity the player is talking
-   to and it is loaded on the client;
+   to, it is a living entity, and it is loaded on the client. A bound `interaction` entity, item frame or other
+   non-living entity gets no 3D headshot;
 3. no headshot: the text starts at the box's left edge.
 
 A conversation opened by command or at a bound block has no entity, so it only shows portraits. A node whose `speaker`
@@ -256,7 +257,8 @@ The rules follow Blockbench's own Bedrock export, which is what GeckoLib reads.
 - Box UV cubes stay box UV when GeckoLib can draw them as Blockbench does, with their UV offset and mirroring. A box
   UV cube with a face that is not drawn, faces on different textures, or a texture that is scaled in the atlas is
   written with per-face UVs instead, with a warning; so is one with a fractional size in the `modded_entity` format.
-  In other formats a fractional size stays box UV, laid out from the size rounded down, as Blockbench draws it.
+  In other formats a fractional size stays box UV, laid out from the size rounded down, as Blockbench draws it, except
+  a size that float noise leaves within 1e-7 below a whole number, which is written per face.
 - Per-face UV is written face by face, with Blockbench's flip of the up and down faces, and UV rotation.
 - Faces whose texture is set to none are not drawn. A face with no texture assigned is drawn with the default texture
   (the first one, or in `bedrock_block` the one set as default), with a warning outside the single-texture formats
