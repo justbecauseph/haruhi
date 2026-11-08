@@ -126,8 +126,7 @@ class DialogueLayoutTest {
     @Test
     void aTextThatFitsIsNotPaged() {
         DialogueLayout layout = layout(WIDTH_2, HEIGHT_2, true, true, 0, lines(9));
-        assertFalse(layout.paged());
-        assertTrue(layout.pageLines() >= 9);
+        assertTrue(layout.pageLines() >= layout.lineCount());
     }
 
     /**
@@ -139,7 +138,7 @@ class DialogueLayoutTest {
     void aLongTextStopsGrowingTheBoxAtTwoFifthsOfTheScreenAndPages() {
         int choiceRoom = ChoiceLayout.reservedHeight(5, LINE, 8);
         DialogueLayout layout = layout(WIDTH_4, HEIGHT_4, true, true, choiceRoom, lines(100));
-        assertTrue(layout.paged());
+        assertTrue(layout.lineCount() > layout.pageLines());
         assertEquals(5, layout.pageLines());
         assertEquals(PADDING + 18 + 5 * LINE + DialogueLayout.BOTTOM_PADDING, layout.boxHeight());
         assertTrue(layout.boxHeight() <= HEIGHT_4 * 2 / 5);
@@ -161,7 +160,7 @@ class DialogueLayoutTest {
         int choiceRoom = ChoiceLayout.reservedHeight(5, LINE, 8);
         DialogueLayout layout = layout(WIDTH_4, 150, true, true, choiceRoom, lines(100));
         assertEquals(MARGIN + choiceRoom, layout.boxY());
-        assertTrue(layout.paged());
+        assertTrue(layout.lineCount() > layout.pageLines());
         assertEquals(3, layout.pageLines());
     }
 

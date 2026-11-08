@@ -1,9 +1,11 @@
 package town.lampas.haruhi.client.dialogue;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -77,6 +79,8 @@ public final class DialogueScreen extends Screen {
     private Typewriter typewriter;
     /** When a choice or continue was last sent, or -1. Input waits for the next node, up to {@link #AWAIT_TIMEOUT_MILLIS}. */
     private long awaitingSinceMillis = -1L;
+    /** The advance keys (Space, Enter, keypad Enter) pressed and not yet released, to tell a key repeat from a press. */
+    private final Set<Integer> heldAdvanceKeys = new HashSet<>();
 
     private List<FormattedCharSequence> lines = List.of();
     /** The pages of {@link #lines}, from the last layout; null before the first layout of the node. */
@@ -185,7 +189,7 @@ public final class DialogueScreen extends Screen {
         box = DialogueLayout.compute(width, height, headshotLaidOut, hasName(), font.lineHeight, lineHeight,
                 choiceRoom, textWidth -> font.split(text, textWidth).size());
         lines = font.split(text, box.textWidth());
-        pages = TextPages.paginate(codepoints(lines), box.pageLines());
+        pages = TextPages.paginate(TextPages.codepoints(lines), box.pageLines());
         if (relayout) {
             page = pages.pageAt(pages.charOfGlyph(pageStartGlyphs));
             revealed = pages.charOfGlyph(revealedGlyphs);
@@ -396,7 +400,10 @@ public final class DialogueScreen extends Screen {
     public boolean keyPressed(KeyEvent event) {
         int key = event.key();
         if (key == GLFW.GLFW_KEY_SPACE || key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
-            advance();
+            // Minecraft passes key repeats here as presses, without saying which they are; a press of a key that has
+            // not been released since its last press is a repeat.
+            boolean repeat = !heldAdvanceKeys.add(key);
+            advance(repeat);
             return true;
         }
         if ((key == GLFW.GLFW_KEY_UP || key == GLFW.GLFW_KEY_DOWN) && choicesShown()) {
@@ -412,6 +419,12 @@ public final class DialogueScreen extends Screen {
     }
 
     @Override
+    public boolean keyReleased(KeyEvent event) {
+        heldAdvanceKeys.remove(event.key());
+        return super.keyReleased(event);
+    }
+
+    @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return super.mouseClicked(event, doubleClick);
@@ -420,7 +433,7 @@ public final class DialogueScreen extends Screen {
         if (position >= 0 && isTextComplete()) {
             pick(position);
         } else {
-            advance();
+            advance(false);
         }
         return true;
     }
@@ -451,15 +464,19 @@ public final class DialogueScreen extends Screen {
 
     /**
      * Finishes typing the page; or turns to the next page when the page is finished, without asking the server; or, on
-     * the last page, continues when the node has no choices.
+     * the last page, continues when the node has no choices. A key repeat only finishes typing, so holding the key down
+     * does not skim through pages or nodes the player has not read.
      */
-    private void advance() {
+    private void advance(boolean repeat) {
         if (node == null || pages == null || isAwaitingServer()) {
             return;
         }
         long now = Util.getMillis();
         if (visibleEnd(now) < pages.page(page).endChar()) {
             typewriter.complete();
+            return;
+        }
+        if (repeat) {
             return;
         }
         if (!onLastPage()) {
@@ -534,20 +551,6 @@ public final class DialogueScreen extends Screen {
         }
         Entity entity = Minecraft.getInstance().level.getEntity(id.getAsInt());
         return entity instanceof LivingEntity living ? living : null;
-    }
-
-    /** The code points of each line, for {@link TextPages}. */
-    private static List<int[]> codepoints(List<FormattedCharSequence> lines) {
-        List<int[]> all = new ArrayList<>(lines.size());
-        for (FormattedCharSequence line : lines) {
-            StringBuilder text = new StringBuilder();
-            line.accept((index, style, codepoint) -> {
-                text.appendCodePoint(codepoint);
-                return true;
-            });
-            all.add(text.codePoints().toArray());
-        }
-        return all;
     }
 
     /** The first {@code limit} characters of {@code line}, with their styles. */

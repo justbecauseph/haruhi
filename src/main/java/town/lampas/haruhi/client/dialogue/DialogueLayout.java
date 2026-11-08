@@ -114,11 +114,6 @@ record DialogueLayout(
         return size >= MIN_HEADSHOT_SIZE && textWidth >= MIN_TEXT_WIDTH ? size : 0;
     }
 
-    /** Whether the text has more lines than the box holds, so it is shown in pages. */
-    boolean paged() {
-        return lineCount > pageLines;
-    }
-
     /** Whether the box shows a headshot frame. */
     boolean hasFrame() {
         return frameSize > 0;

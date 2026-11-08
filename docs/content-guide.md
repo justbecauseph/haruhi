@@ -768,7 +768,8 @@ Layout:
   speaker and it is loaded. With neither, there is no headshot and the text starts at the box's left edge. On a very
   small window the headshot is left out.
 - Right of the headshot: the speaker's name, a divider, and the text, which types out character by character. The box
-  grows with the text, up to two fifths of the screen's height and never into the room left above it for the choices.
+  grows with the text up to two fifths of the screen's height (or a full headshot's height, where that is more),
+  and never into the room left above it for the choices.
 - Text longer than the box holds is split into pages, so a long speech can stay in one node; you never need to know
   the box's size. Pages break between whole lines, and at a blank line (a paragraph break) when one falls in the lower
   half of the page. Each page types out on its own, and a page indicator such as `1/3` shows at the bottom right. How
@@ -783,7 +784,7 @@ Controls:
 
 | Input | Effect |
 |---|---|
-| Left click, Space, Enter or keypad Enter | While a page types: shows all of it. When it has finished: turns to the next page; on the last page, continues when the node has no choices. |
+| Left click, Space, Enter or keypad Enter | While a page types: shows all of it. When it has finished: turns to the next page; on the last page, continues when the node has no choices. Holding the key down only shows the page in full: turning a page or continuing takes a new press. |
 | `1` to `9`, top row or keypad | Picks that choice, once the last page has finished. |
 | Left click on a choice | Picks it, once the last page has finished. Before that, the click finishes the page. |
 | Hover a grayed-out choice | Shows its `unavailable_message`. It cannot be picked. |

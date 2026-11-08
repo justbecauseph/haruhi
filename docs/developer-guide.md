@@ -133,12 +133,14 @@ experience and jump bars draw nothing in that step, so they are fully hidden.
 ### Pages in the dialogue screen
 
 The client pages a node's text; the server and the payloads know nothing of pages. `DialogueLayout` caps the box at
-40% of the screen's height (but never below a full headshot with its padding) and below the room kept for three
-choice rows, and gives `pageLines`, the lines the box holds. `DialogueScreen` wraps the text with `font.split` and
+40% of the screen's height (but never below a full headshot with its padding) and below the room kept for up to
+three choice rows, and gives `pageLines`, the lines the box holds. `DialogueScreen` wraps the text with `font.split` and
 hands the lines' code points to `TextPages`, which splits them into pages of whole lines, ending a page early at a
 blank line in its lower half and starting no later page on a blank line. Each page types out with its own
 `Typewriter`. A press on a finished page turns to the next one locally; only a press on the last page sends
-`DialogueChoicePayload.CONTINUE`, and choices are drawn and pickable only on the last page.
+`DialogueChoicePayload.CONTINUE`, and choices are drawn and pickable only on the last page. Minecraft passes key
+repeats to `keyPressed` without marking them, so the screen keeps the advance keys that are down (`keyReleased`
+takes them off) and lets a repeat only finish the typing.
 
 Wrapping drops the space or line break at each break, so a character offset is only valid for one wrap. When the
 screen lays out again (`init()` on a resize or GUI scale change, or the speaker loading or unloading, which adds or

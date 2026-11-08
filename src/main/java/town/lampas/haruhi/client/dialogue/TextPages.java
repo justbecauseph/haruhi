@@ -2,12 +2,14 @@ package town.lampas.haruhi.client.dialogue;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.util.FormattedCharSequence;
 
 /**
  * The pages of a node's text in the {@link DialogueScreen}. The screen wraps the text to the box's text column, and when it
  * wraps to more lines than the box holds, this splits the lines into pages of whole lines, so a page never cuts a line in
- * two. A page ends early at a blank line, the break between two paragraphs, when that leaves it at least half full, and a
- * page after the first does not start with blank lines. Pure arithmetic on code points, so it is unit tested.
+ * two. A page ends early at a blank line, the break between two paragraphs, when that leaves it at least half full, and
+ * no page starts with blank lines; a text of nothing but blank lines is one page. Pure arithmetic on code points with
+ * no client classes, so it is unit tested.
  *
  * <p>Positions are character (code point) offsets into the wrapped lines read one after another. Wrapping drops the space
  * or line break at each break, so after the text wraps to another width (a resize, another GUI scale, a headshot that
@@ -63,13 +65,11 @@ final class TextPages {
         int line = 0;
         while (line < count) {
             int first = line;
-            if (!pages.isEmpty()) {
-                while (first < count && blank[first]) {
-                    first++;
-                }
-                if (first == count) {
-                    break;
-                }
+            while (first < count && blank[first]) {
+                first++;
+            }
+            if (first == count) {
+                break;
             }
             int end = Math.min(count, first + perPage);
             if (end < count && !blank[end]) {
@@ -88,6 +88,20 @@ final class TextPages {
             pages.add(new Page(0, count, 0, starts[count]));
         }
         return new TextPages(starts, whitespace, pages);
+    }
+
+    /** The code points of each wrapped line, as {@link #paginate} takes them; styles are left out. */
+    static List<int[]> codepoints(List<FormattedCharSequence> lines) {
+        List<int[]> all = new ArrayList<>(lines.size());
+        for (FormattedCharSequence line : lines) {
+            StringBuilder text = new StringBuilder();
+            line.accept((index, style, codepoint) -> {
+                text.appendCodePoint(codepoint);
+                return true;
+            });
+            all.add(text.codePoints().toArray());
+        }
+        return all;
     }
 
     /** How many pages there are, at least 1. */

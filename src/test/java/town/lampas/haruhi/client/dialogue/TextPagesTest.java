@@ -4,6 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.StringSplitter;
+import net.minecraft.locale.Language;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.util.FormattedCharSequence;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -64,13 +70,32 @@ class TextPagesTest {
     }
 
     @Test
-    void aPageAfterTheFirstDoesNotStartWithBlankLines() {
+    void noPageStartsWithBlankLines() {
         TextPages pages = TextPages.paginate(lines("a", "b", "", "  ", "c"), 2);
         assertEquals(2, pages.size());
         assertEquals(4, pages.page(1).firstLine(), "a line of spaces is blank too");
         assertEquals(5, pages.page(1).endLine());
-        assertEquals(0, TextPages.paginate(lines("", "a", "b"), 5).page(0).firstLine(),
-                "the first page keeps the blank lines the text starts with");
+        assertEquals(1, TextPages.paginate(lines("", "a", "b"), 5).page(0).firstLine());
+    }
+
+    /**
+     * A text that starts with a page's worth of blank lines does not show an empty first page, and the start of its
+     * text is on the first page, where a re-wrap finds it.
+     */
+    @Test
+    void blankLinesThatWouldFillTheFirstPageMakeNoPage() {
+        TextPages pages = TextPages.paginate(lines("", "", "", "abc", "def"), 2);
+        assertEquals(1, pages.size());
+        assertEquals(new TextPages.Page(3, 5, 0, 6), pages.page(0));
+        assertEquals(0, pages.pageAt(pages.charOfGlyph(0)));
+    }
+
+    @Test
+    void aTextOfOnlyBlankLinesIsOnePage() {
+        TextPages pages = TextPages.paginate(lines("", " ", ""), 2);
+        assertEquals(1, pages.size());
+        assertEquals(0, pages.page(0).firstLine());
+        assertEquals(3, pages.page(0).endLine());
     }
 
     @Test
@@ -140,6 +165,32 @@ class TextPagesTest {
         int at = after.charOfGlyph(glyphs);
         assertEquals('j', flatten(wide).charAt(at));
         assertEquals(0, after.pageAt(at));
+    }
+
+    /**
+     * The screen wraps with {@code Font.split}, which is {@code StringSplitter.splitLines} followed by
+     * {@code Language.getVisualOrder}. Run through the same steps with a fixed-width font, at widths from five
+     * characters (which breaks words) to the whole text, the wrapped lines keep every non-whitespace character of the
+     * styled text in order, so a position counted in them names the same character at every width.
+     */
+    @Test
+    void minecraftsWrappingDropsOnlyWhitespace() {
+        Component text = Component.literal("Long ago, before the harbour walls were raised,\n\nthe town of ")
+                .append(Component.literal("Maraha").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+                .append(" kept a lighthouse;  Supercalifragilisticexpialidocious words break.\nThe end.");
+        String glyphs = text.getString().replaceAll("\\s", "");
+        StringSplitter splitter = new StringSplitter((codepoint, style) -> 6.0F);
+        for (int width : new int[] {30, 66, 120, 240, 10_000}) {
+            List<FormattedCharSequence> wrapped =
+                    Language.getInstance().getVisualOrder(splitter.splitLines(text, width, Style.EMPTY));
+            List<int[]> lines = TextPages.codepoints(wrapped);
+            String flat = flatten(lines);
+            assertEquals(glyphs, flat.replaceAll("\\s", ""), "width " + width);
+            TextPages pages = TextPages.paginate(lines, 3);
+            for (int g = 0; g < glyphs.length(); g++) {
+                assertEquals(glyphs.charAt(g), flat.charAt(pages.charOfGlyph(g)), "width " + width + ", glyph " + g);
+            }
+        }
     }
 
     private static List<int[]> lines(String... lines) {
