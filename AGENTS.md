@@ -329,3 +329,7 @@ store Bedrock signs), loop modes, and catmullrom and step keyframes as Bedrock `
   `blend_weight`, `start_delay`, `loop_delay`, `relative_to` and bone `binding`. Molang strings are kept as strings and
   checked against GeckoLib's parser, functions and queries.
 - Compressed `.bbmodel` files are refused; save them uncompressed first.
+
+## Lampas knowledgebase (lampas-kb)
+
+`.mcp.json` connects the `lampas-kb` MCP server at `https://kb.lampas.town/mcp`; it needs a token from https://kb.lampas.town/auth/token in the `LAMPAS_KB_TOKEN` environment variable ([kb README](https://github.com/justbecauseph/lampas-two-kb/blob/main/kb/README.md#mcp-server-lampas-kb)). Ask it before stating what is deployed, decided or designed for Lampas 2 outside this repository: take versions from its `status` tool, attribute discussion to the person who said it, and treat plans as intent.
