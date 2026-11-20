@@ -1,6 +1,7 @@
 package town.lampas.haruhi.binding;
 
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityLevelChangeEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
@@ -11,16 +12,22 @@ import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.server.MinecraftServer;
+import org.jspecify.annotations.Nullable;
 import town.lampas.haruhi.api.HaruhiServices;
 
 /**
  * Owned by the binding component: conversations attached to placed blocks and to entities that are not
  * {@code haruhi:npc}. Registers the entity attachment, the server-side use callbacks, the block-break listener, the
- * listeners that log an entity binding's end, and the {@code /haruhi bind}, {@code /haruhi unbind} and
- * {@code /haruhi bindings} commands, and registers the read-only {@link BindingService}. Reads the content, dialogue
- * and npc services at use time.
+ * listeners that log an entity binding's end, clientbound override hints, and the {@code /haruhi bind},
+ * {@code /haruhi unbind} and {@code /haruhi bindings} commands, and registers the read-only {@link BindingService}.
+ * Reads the content, dialogue and npc services at use time.
  */
 public final class BindingModule {
+    /** The running server, so content activation can refresh client block override hints. Server lifecycle only. */
+    private static volatile @Nullable MinecraftServer server;
+
     private BindingModule() {}
 
     public static void init() {
@@ -31,15 +38,25 @@ public final class BindingModule {
         UseItemCallback.EVENT.register(BindingInteractions::useItem);
         PlayerBlockBreakEvents.BEFORE.register(BindingInteractions::beforeBreak);
         PlayerBlockBreakEvents.AFTER.register(BindingInteractions::afterBreak);
-        ServerTickEvents.END_SERVER_TICK.register(server -> BindingInteractions.settleBreaks());
+        ServerTickEvents.END_SERVER_TICK.register(srv -> BindingInteractions.settleBreaks());
         // An entity binding goes with its entity; these log when it does.
         ServerLivingEntityEvents.AFTER_DEATH.register(EntityBindingEnds::afterDeath);
         ServerLivingEntityEvents.MOB_CONVERSION.register(EntityBindingEnds::onConversion);
         ServerEntityEvents.ENTITY_UNLOAD.register(EntityBindingEnds::onUnload);
         // Each dimension's bindings are read from disk as it loads, not on the first use in play.
-        ServerLevelEvents.LOAD.register((server, level) -> BlockBindings.of(level));
+        ServerLevelEvents.LOAD.register((srv, level) -> BlockBindings.of(level));
+        ServerLifecycleEvents.SERVER_STARTING.register(started -> server = started);
+        ServerLifecycleEvents.SERVER_STOPPED.register(stopped -> {
+            server = null;
+            BindingInteractions.clear();
+        });
+        HaruhiServices.content().addActivationListener(bundle -> BoundBlockSync.syncAll(server, bundle));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, srv) -> BoundBlockSync.syncPlayer(handler.player));
+        ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register(
+                (player, origin, destination) -> BoundBlockSync.syncPlayer(player));
+        ServerPlayerEvents.AFTER_RESPAWN.register(
+                (oldPlayer, newPlayer, alive) -> BoundBlockSync.syncPlayer(newPlayer));
         ServerPlayerEvents.LEAVE.register(BindingInteractions::forget);
-        ServerLifecycleEvents.SERVER_STOPPED.register(server -> BindingInteractions.clear());
         CommandRegistrationCallback.EVENT.register(BindingCommands::register);
     }
 }

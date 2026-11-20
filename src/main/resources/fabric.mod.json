@@ -18,6 +18,9 @@
     ],
     "client": [
       "town.lampas.haruhi.client.HaruhiClient"
+    ],
+    "jade": [
+      "town.lampas.haruhi.compat.jade.HaruhiJadePlugin"
     ]
   },
   "mixins": [
@@ -35,5 +38,8 @@
   },
   "recommends": {
     "geckolib": ">=5.5.5"
+  },
+  "suggests": {
+    "jade": ">=26.2.0"
   }
 }

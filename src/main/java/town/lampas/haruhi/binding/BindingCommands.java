@@ -106,6 +106,7 @@ final class BindingCommands {
         Optional<BlockBinding> previous = bindings.put(pos, bound);
         // One binding per block: binding one half of a door, bed or double chest replaces the other half's.
         Optional<BlockBinding> otherHalf = BlockParts.connectedHalf(level, pos, state).flatMap(bindings::remove);
+        BoundBlockSync.syncLevel(level);
         String replaced = previous.or(() -> otherHalf).map(old -> ", replacing " + old.graph()).orElse("");
         source.sendSuccess(() -> Component.literal("Bound " + bound.block() + " at " + describe(level, pos) + " to "
                 + bound.graph() + BindingProblems.speakerSuffix(bound.speaker()) + replaced), true);
@@ -153,6 +154,7 @@ final class BindingCommands {
         if (removed.isEmpty()) {
             throw fail("No block binding at " + describe(level, given));
         }
+        BoundBlockSync.syncLevel(level);
         source.sendSuccess(() -> Component.literal("Unbound " + removed.get().block() + " at " + describe(level, pos)
                 + " from " + removed.get().graph()), true);
         return Command.SINGLE_SUCCESS;

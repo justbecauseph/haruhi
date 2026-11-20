@@ -43,8 +43,8 @@ The Guild itself is a later consumer and is not in this repository.
   (`justbecauseph/maven`) when a GitHub release `v<mod_version>` is published, after `./gradlew clean build` passes. A
   version already in that repository is never replaced, so bump `mod_version` for every release. Locally,
   `./gradlew publishMavenJavaPublicationToPublicMavenRepository` writes to `build/public-maven`. Dev-only runtime
-  dependencies go in `localRuntime`, never `runtimeOnly`, which would publish them to consumers; `check` fails if
-  GeckoLib reaches the POM or the Gradle module metadata.
+  dependencies (GeckoLib and optional Jade integration) go in `localRuntime`, never `runtimeOnly`, which would
+  publish them to consumers; `check` fails if `geckolib` or `jade` reaches the POM or the Gradle module metadata.
 
 ## Architecture
 
@@ -53,7 +53,7 @@ The Guild itself is a later consumer and is not in this repository.
 | storage | `town.lampas.haruhi.storage` (except the contract files below), `src/main/resources/haruhi/migrations/` | `StorageModule`, config `config/haruhi.json`, in-memory and PostgreSQL (`HikariCP`, versioned SQL migrations) implementations of `HaruhiStorage` | nothing |
 | content | `town.lampas.haruhi.content` (except the contract files) and `content.remote`, `src/main/resources/haruhi/seed_bundle.json` | `ContentModule`: JSON codecs for the bundle format below, full validation, SHA-256 digest, revisions through `HaruhiStorage`, activation on startup, `/haruhi content` commands, the `haruhi:content/*` management methods and the Portal fetch (config `config/haruhi-content.json`; see Management methods below) | storage (interface), `DialogueRegistries` for parsing specs; binding (`BindingService`) and npc (`NpcControl`) at use time, for `haruhi:content/bindings` |
 | dialogue | `town.lampas.haruhi.dialogue` (except `dialogue/api`), `town.lampas.haruhi.mixin` (except `JsonRpcParamsLogMixin`, owned by content) | `DialogueModule`: sessions (tied to an NPC or, through `openAt`, to a place, with an optional `DialogueSpeaker` for nodes that name no speaker), graph runtime, node text resolved for the player when sent, every built-in below, flag and visit caching and persistence, server payload receivers, the vanilla dialog presenter, `/haruhi dialogue` commands | content (`ContentService`), storage (interface), npc (`NpcControl`) |
-| binding | `town.lampas.haruhi.binding` | `BindingModule`: block bindings in per-dimension saved data (`BlockBindings`, `<dimension>/data/haruhi/block_bindings.dat`), entity bindings as the persistent Fabric attachment `haruhi:binding` (`EntityBindings`), the server-side `UseBlockCallback` and `UseEntityCallback` that open a bound graph in place of the vanilla interaction, the `PlayerBlockBreakEvents` listeners that drop a broken block's binding (noted before the break, removed once the block is gone, at the latest at the end of the tick), `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings`, and the read-only `BindingService` (`HaruhiServices.bindings()`) that lists the same bindings with the same problems | content (`ContentService`), dialogue (`DialogueService`), npc (`NpcControl`) |
+| binding | `town.lampas.haruhi.binding`, `compat.jade`, `client.jade`, `client.binding` | `BindingModule`: block bindings in per-dimension saved data (`BlockBindings`, `<dimension>/data/haruhi/block_bindings.dat`), entity bindings as the synced persistent Fabric attachment `haruhi:binding` (`EntityBindings`), `BoundBlocksPayload` override hints (`BoundBlockSync` / `BoundBlockHints`), the server-side `UseBlockCallback` and `UseEntityCallback` that open a bound graph in place of the vanilla interaction, the `PlayerBlockBreakEvents` listeners that drop a broken block's binding (noted before the break, removed once the block is gone, at the latest at the end of the tick), `/haruhi bind`, `/haruhi unbind` and `/haruhi bindings`, the read-only `BindingService` (`HaruhiServices.bindings()`), and optional Jade HUD title overrides (`HaruhiJadePlugin` / `HaruhiJadeClient`) | content (`ContentService`), dialogue (`DialogueService`), npc (`NpcControl`); optional Jade (`snownee.jade`, isolated to `compat.jade` and `client.jade`) |
 | npc and client | `town.lampas.haruhi.npc` (except `NpcControl`), `town.lampas.haruhi.client` (except `HaruhiClient`), `assets/haruhi/**` | `NpcModule`: entity type, profile and look syncing, interaction, `/haruhi npc` commands, `NpcControl`. `NpcClient`: GeckoLib replaced-entity renderer, vanilla player-model fallback, default humanoid model and animations, animation payload receiver. `DialogueClient`: the visual-novel screen, which splits text taller than its box into pages on the client (`TextPages`); while it is open, `DialogueHud` hides the vanilla HUD elements under its box (hotbar, status bars, experience bar and level, held-item name, crosshair) and moves the chat above the box | content (`ContentService`), dialogue (`DialogueService`), the payloads |
 
 Initialisation order, in `Haruhi.onInitialize`: payload types, storage, content, dialogue, npc, binding. A module may
@@ -80,9 +80,10 @@ Each component writes its GameTests in its own class, already listed in the Game
 
 ### Rules every component follows
 
-- **Client code stays in the client package.** Nothing outside `town.lampas.haruhi.client` references
-  `net.minecraft.client` or `com.geckolib`. The Lampas server does not have GeckoLib, and `ArchitectureTest` fails the
-  build if this is broken. The NPC entity class is a plain Minecraft entity.
+- **Boundary rules:** Nothing outside `town.lampas.haruhi.client` references `net.minecraft.client` or
+  `com.geckolib` (the server never loads GeckoLib or client classes). Nothing outside `town.lampas.haruhi.compat.jade`
+  and `town.lampas.haruhi.client.jade` references `snownee.jade` (Jade is optional). `ArchitectureTest` fails the
+  build if either rule is broken. The NPC entity class is a plain Minecraft entity.
 - **No blocking I/O on the server thread.** Storage futures complete off-thread. Hop back with `server.execute(...)`
   before touching game state.
 - **The server checks again whatever the client sends.** The client sends only session id, node id and choice index.
@@ -154,6 +155,9 @@ Field rules (the content component enforces them, and other components rely on t
   - `model`, `animations`, `portrait` and `dialogue` are optional.
   - `scale` defaults to 1.0 and must be within (0, 4].
   - No `model` means the built-in default humanoid model, with `texture` used as a 64×64 player-layout skin.
+- **Graph fields:**
+  - `start` and `nodes` are required; `speaker_name` (text component) is optional and overrides a bound block's or
+    entity's own name on nodes that have no speaking NPC profile.
 - **Node fields:**
   - A node with `random` is a router. It has no `text` and no `choices`, and every weight is > 0.
   - A router branch may have `only_if` (default empty). After the router's `on_enter`, it picks by weight among the
@@ -247,7 +251,10 @@ blocks and entities" in `docs/content-guide.md`, are the user-facing reference; 
   bed or double chest has one binding for both halves (`BlockParts`). A player breaking that block removes the
   binding; any other change leaves it inactive until the block is back. `BlockBindings` loads in
   `ServerLevelEvents.LOAD`, so no use reads the file. An entity binding is the persistent attachment `haruhi:binding`,
-  not copied on mob conversion and not synced. `EntityBindingEnds` logs its end once: a death (`AFTER_DEATH`), a
+  not copied on mob conversion and synced to tracking clients (`Binding.STREAM_CODEC`). Client hints for block bindings
+  whose active graph has a `speaker_name` override (`BoundBlocksPayload`) sync on join, dimension change, respawn,
+  content activation and block bind/unbind/break so optional Jade tooltips request server data only on those blocks.
+  `EntityBindingEnds` logs its end once: a death (`AFTER_DEATH`), a
   conversion (`MOB_CONVERSION`, before vanilla discards the old mob) or an unload whose removal reason destroys the
   entity. Each takes the binding off as it logs, so a later event for the same entity finds none. An unload that does
   not destroy the entity (a chunk unload, a dimension change, whose new entity keeps the binding) logs nothing.

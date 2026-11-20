@@ -86,6 +86,7 @@
       "type": "object",
       "properties": {
         "start": { "type": "string", "description": "The id of the first node." },
+        "speaker_name": { "$ref": "#/$defs/text", "description": "Speaker name shown on nodes that have no speaking NPC profile, overriding a bound block's or entity's own name." },
         "nodes": {
           "type": "object",
           "description": "Node ids mapped to nodes. Every node must be reachable from start, unless a reachable node holds a provider choice.",

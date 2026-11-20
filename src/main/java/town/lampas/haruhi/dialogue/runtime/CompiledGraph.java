@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import town.lampas.haruhi.content.model.ActionSpec;
 import town.lampas.haruhi.content.model.ConditionSpec;
@@ -67,11 +69,17 @@ public final class CompiledGraph {
     private final Identifier id;
     private final String start;
     private final Map<String, Node> nodes;
+    private final Optional<Component> speakerName;
 
     public CompiledGraph(Identifier id, String start, Map<String, Node> nodes) {
+        this(id, start, nodes, Optional.empty());
+    }
+
+    public CompiledGraph(Identifier id, String start, Map<String, Node> nodes, Optional<Component> speakerName) {
         this.id = id;
         this.start = start;
         this.nodes = Map.copyOf(nodes);
+        this.speakerName = Objects.requireNonNull(speakerName, "speakerName");
     }
 
     public Identifier id() {
@@ -80,6 +88,10 @@ public final class CompiledGraph {
 
     public String start() {
         return start;
+    }
+
+    public Optional<Component> speakerName() {
+        return speakerName;
     }
 
     public Optional<Node> node(String nodeId) {
@@ -94,7 +106,7 @@ public final class CompiledGraph {
                 ParseContext context = new ParseContext(bundle, graph.id(), entry.getKey());
                 nodes.put(entry.getKey(), compileNode(entry.getValue(), context));
             }
-            return DataResult.success(new CompiledGraph(graph.id(), graph.start(), nodes));
+            return DataResult.success(new CompiledGraph(graph.id(), graph.start(), nodes, graph.speakerName()));
         } catch (IllegalStateException e) {
             String message = e.getMessage();
             return DataResult.error(() -> message);

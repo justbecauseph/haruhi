@@ -66,6 +66,7 @@ class BundleValidatorTest {
 
         DialogueGraph gate = bundle.dialogues().get(id(GRAPH));
         assertEquals("hello", gate.start());
+        assertEquals(Optional.empty(), gate.speakerName());
         assertEquals(Set.of("hello", "bye"), gate.nodes().keySet());
 
         DialogueNode hello = gate.nodes().get("hello");
@@ -741,5 +742,18 @@ class BundleValidatorTest {
                         GRAPH + "#hello: action haruhi_test:missing_action is not registered",
                         GRAPH + "#hello, choice 1: condition haruhi_test:missing is not registered"),
                 problems(validate(bundle)));
+    }
+
+    @Test
+    void graphSpeakerNameParsesPlainStringsAndComponents() {
+        JsonObject plain = baseBundle();
+        graph(plain).addProperty("speaker_name", "Crystal Ball");
+        assertEquals(Optional.of("Crystal Ball"),
+                bundleOf(validate(plain)).dialogues().get(id(GRAPH)).speakerName().map(Component::getString));
+
+        JsonObject styled = baseBundle();
+        graph(styled).add("speaker_name", JsonParser.parseString("{\"text\":\"Crystal Ball\",\"color\":\"aqua\"}"));
+        assertEquals(Optional.of("Crystal Ball"),
+                bundleOf(validate(styled)).dialogues().get(id(GRAPH)).speakerName().map(Component::getString));
     }
 }

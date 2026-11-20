@@ -35,7 +35,8 @@ class SpeakerTest {
 
     @Test
     void aBoundEntityWithoutAProfileSpeaksWithItsOwnNameAndIsDrawn() {
-        Speaker.Voice voice = Speaker.resolve(Optional.empty(), VILLAGER, true, Optional.empty(), PROFILES);
+        Speaker.Voice voice = Speaker.resolve(
+                Optional.empty(), VILLAGER, Optional.empty(), true, Optional.empty(), PROFILES);
 
         assertEquals("Librarian", voice.name().getString());
         assertTrue(voice.interlocutorSpeaks(), "the villager's head is the headshot");
@@ -44,8 +45,10 @@ class SpeakerTest {
 
     @Test
     void aBoundEntityWithAProfileSpeaksAsThatProfileAndIsStillDrawn() {
-        Speaker.Voice plain = Speaker.resolve(Optional.empty(), VILLAGER_AS_CLERK, true, Optional.empty(), PROFILES);
-        Speaker.Voice named = Speaker.resolve(Optional.of(CLERK), VILLAGER_AS_CLERK, true, Optional.empty(), PROFILES);
+        Speaker.Voice plain = Speaker.resolve(
+                Optional.empty(), VILLAGER_AS_CLERK, Optional.empty(), true, Optional.empty(), PROFILES);
+        Speaker.Voice named = Speaker.resolve(
+                Optional.of(CLERK), VILLAGER_AS_CLERK, Optional.empty(), true, Optional.empty(), PROFILES);
 
         for (Speaker.Voice voice : new Speaker.Voice[] {plain, named}) {
             assertEquals("Clerk", voice.name().getString());
@@ -56,7 +59,8 @@ class SpeakerTest {
 
     @Test
     void aSpeakerProfileMissingFromTheRevisionFallsBackToTheEntitysName() {
-        Speaker.Voice voice = Speaker.resolve(Optional.empty(), VILLAGER_AS_CLERK, true, Optional.empty(), Map.of());
+        Speaker.Voice voice = Speaker.resolve(
+                Optional.empty(), VILLAGER_AS_CLERK, Optional.empty(), true, Optional.empty(), Map.of());
 
         assertEquals("Librarian", voice.name().getString());
         assertTrue(voice.interlocutorSpeaks());
@@ -65,7 +69,8 @@ class SpeakerTest {
 
     @Test
     void aNodeNamingAnotherProfileSpeaksAsItWithoutTheInterlocutor() {
-        Speaker.Voice voice = Speaker.resolve(Optional.of(GUARD), VILLAGER_AS_CLERK, true, Optional.empty(), PROFILES);
+        Speaker.Voice voice = Speaker.resolve(
+                Optional.of(GUARD), VILLAGER_AS_CLERK, Optional.empty(), true, Optional.empty(), PROFILES);
 
         assertEquals("Guard", voice.name().getString());
         assertFalse(voice.interlocutorSpeaks(), "the villager is not the guard");
@@ -74,7 +79,8 @@ class SpeakerTest {
     @Test
     void aBoundBlockSpeaksWithItsNameAndHasNothingToDraw() {
         Speaker.Voice voice = Speaker.resolve(Optional.empty(),
-                DialogueSpeaker.of(Optional.empty(), Component.literal("Lectern")), false, Optional.empty(), PROFILES);
+                DialogueSpeaker.of(Optional.empty(), Component.literal("Lectern")), Optional.empty(), false,
+                Optional.empty(), PROFILES);
 
         assertEquals("Lectern", voice.name().getString());
         assertFalse(voice.interlocutorSpeaks());
@@ -82,11 +88,12 @@ class SpeakerTest {
 
     @Test
     void withoutASpeakerAnNpcSpeaksWithItsProfileAsBefore() {
-        Speaker.Voice own = Speaker.resolve(Optional.empty(), DialogueSpeaker.NONE, true, Optional.of(CLERK), PROFILES);
-        Speaker.Voice other = Speaker.resolve(Optional.of(GUARD), DialogueSpeaker.NONE, true, Optional.of(CLERK),
-                PROFILES);
-        Speaker.Voice missing = Speaker.resolve(Optional.empty(), DialogueSpeaker.NONE, true, Optional.of(CLERK),
-                Map.of());
+        Speaker.Voice own = Speaker.resolve(
+                Optional.empty(), DialogueSpeaker.NONE, Optional.empty(), true, Optional.of(CLERK), PROFILES);
+        Speaker.Voice other = Speaker.resolve(Optional.of(GUARD), DialogueSpeaker.NONE, Optional.empty(), true,
+                Optional.of(CLERK), PROFILES);
+        Speaker.Voice missing = Speaker.resolve(
+                Optional.empty(), DialogueSpeaker.NONE, Optional.empty(), true, Optional.of(CLERK), Map.of());
 
         assertEquals("Clerk", own.name().getString());
         assertTrue(own.interlocutorSpeaks());
@@ -98,9 +105,54 @@ class SpeakerTest {
 
     @Test
     void withoutASpeakerAConversationWithAnEntityThatIsNotAnNpcHasNoSpeakerAsBefore() {
-        Speaker.Voice voice = Speaker.resolve(Optional.empty(), DialogueSpeaker.NONE, true, Optional.empty(), PROFILES);
+        Speaker.Voice voice = Speaker.resolve(
+                Optional.empty(), DialogueSpeaker.NONE, Optional.empty(), true, Optional.empty(), PROFILES);
 
         assertEquals("", voice.name().getString());
         assertFalse(voice.interlocutorSpeaks());
+    }
+
+    @Test
+    void aGraphSpeakerNameOverridesABoundBlockOrEntitysOwnName() {
+        Optional<Component> override = Optional.of(Component.literal("Crystal Ball"));
+
+        Speaker.Voice block = Speaker.resolve(Optional.empty(),
+                DialogueSpeaker.of(Optional.empty(), Component.literal("Chest")), override, false, Optional.empty(),
+                PROFILES);
+        assertEquals("Crystal Ball", block.name().getString());
+        assertFalse(block.interlocutorSpeaks());
+
+        Speaker.Voice entity = Speaker.resolve(Optional.empty(), VILLAGER, override, true, Optional.empty(), PROFILES);
+        assertEquals("Crystal Ball", entity.name().getString());
+        assertTrue(entity.interlocutorSpeaks(), "the bound entity still keeps its 3D headshot");
+
+        Speaker.Voice missingProfile = Speaker.resolve(
+                Optional.empty(), VILLAGER_AS_CLERK, override, true, Optional.empty(), Map.of());
+        assertEquals("Crystal Ball", missingProfile.name().getString(),
+                "a missing session profile falls back to the graph override before the entity name");
+        assertTrue(missingProfile.interlocutorSpeaks());
+
+        Speaker.Voice none = Speaker.resolve(
+                Optional.empty(), DialogueSpeaker.NONE, override, true, Optional.empty(), PROFILES);
+        assertEquals("Crystal Ball", none.name().getString());
+        assertFalse(none.interlocutorSpeaks());
+    }
+
+    @Test
+    void anNpcProfileStillWinsOverAGraphSpeakerName() {
+        Optional<Component> override = Optional.of(Component.literal("Crystal Ball"));
+
+        Speaker.Voice boundWithProfile = Speaker.resolve(
+                Optional.empty(), VILLAGER_AS_CLERK, override, true, Optional.empty(), PROFILES);
+        assertEquals("Clerk", boundWithProfile.name().getString());
+
+        Speaker.Voice npc = Speaker.resolve(
+                Optional.empty(), DialogueSpeaker.NONE, override, true, Optional.of(CLERK), PROFILES);
+        assertEquals("Clerk", npc.name().getString());
+
+        Speaker.Voice nodeSpeaker = Speaker.resolve(Optional.of(GUARD), VILLAGER, override, true, Optional.empty(),
+                PROFILES);
+        assertEquals("Guard", nodeSpeaker.name().getString());
+        assertFalse(nodeSpeaker.interlocutorSpeaks());
     }
 }

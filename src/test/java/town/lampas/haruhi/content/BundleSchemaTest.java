@@ -131,6 +131,10 @@ class BundleSchemaTest {
                         bundle.add("extensions", element("{\"haruhi_test:ext\": {\"ids\": [\"a\"]}}"))),
                 valid("scale 4", bundle -> npc(bundle).addProperty("scale", 4)),
                 valid("scale 0.01", bundle -> npc(bundle).addProperty("scale", 0.01)),
+                valid("a graph speaker_name as a string", bundle ->
+                        graph(bundle).addProperty("speaker_name", "Crystal Ball")),
+                valid("a graph speaker_name as a component object", bundle ->
+                        graph(bundle).add("speaker_name", element("{\"text\":\"Crystal Ball\",\"color\":\"aqua\"}"))),
                 valid("a provider choice", bundle ->
                         choices(bundle).add(element("{\"provider\": {\"type\": \"haruhi_test:provider\"}}"))),
 
@@ -155,6 +159,9 @@ class BundleSchemaTest {
                         bundle.getAsJsonObject("npcs").add("Bad Key", npc(bundle).deepCopy())),
                 invalid("a graph without start", bundle -> graph(bundle).remove("start")),
                 invalid("a graph without nodes", bundle -> graph(bundle).remove("nodes")),
+                invalid("a graph speaker_name as a number", bundle -> graph(bundle).addProperty("speaker_name", 5)),
+                invalid("a graph speaker_name as an empty array", bundle ->
+                        graph(bundle).add("speaker_name", new JsonArray())),
                 invalid("an unknown graph key", bundle -> graph(bundle).addProperty("first", "hello")),
                 invalid("a node without text", bundle -> node(bundle, "bye").remove("text")),
                 invalid("an unknown node key", bundle -> node(bundle, "bye").add("onEnter", new JsonArray())),

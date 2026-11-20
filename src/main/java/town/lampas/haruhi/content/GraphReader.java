@@ -8,14 +8,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import town.lampas.haruhi.content.model.DialogueGraph;
 import town.lampas.haruhi.content.model.DialogueNode;
 
-/** Reads one dialogue graph: its start node and its nodes. */
+/** Reads one dialogue graph: its start node, optional speaker name override and its nodes. */
 final class GraphReader {
     /** The keys a graph may have. Any other key is an error. */
-    static final Set<String> GRAPH_KEYS = Set.of("start", "nodes");
+    static final Set<String> GRAPH_KEYS = Set.of("start", "speaker_name", "nodes");
 
     private final DynamicOps<JsonElement> ops;
     private final Problems problems;
@@ -57,6 +58,7 @@ final class GraphReader {
         Fields fields = new Fields(object, where, problems);
         fields.allowOnly(GRAPH_KEYS);
         Optional<String> start = fields.required("start", JsonValues::string);
+        Optional<Component> speakerName = fields.optional("speaker_name", JsonValues.text(ops));
         Optional<JsonObject> nodes = fields.required("nodes", JsonValues::object);
         if (nodes.isEmpty()) {
             return new Read(Optional.empty(), false);
@@ -76,6 +78,6 @@ final class GraphReader {
         if (start.isEmpty()) {
             return new Read(Optional.empty(), false);
         }
-        return new Read(Optional.of(new DialogueGraph(graphId, start.get(), parsed)), complete);
+        return new Read(Optional.of(new DialogueGraph(graphId, start.get(), parsed, speakerName)), complete);
     }
 }

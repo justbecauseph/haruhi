@@ -44,6 +44,12 @@ dependencies {
 	// The client renderer's unit tests load GeckoLib classes; test configurations are not published either.
 	testRuntimeOnly "maven.modrinth:geckolib:${project.geckolib_version}"
 
+	// Jade integration is optional: compiled against Jade, present in dev runtime/GameTests, never published as a dependency.
+	compileOnly "maven.modrinth:jade:${project.jade_version}"
+	localRuntime "maven.modrinth:jade:${project.jade_version}"
+	testCompileOnly "maven.modrinth:jade:${project.jade_version}"
+	testRuntimeOnly "maven.modrinth:jade:${project.jade_version}"
+
 	// PostgreSQL storage adapter, nested in the jar.
 	implementation "org.postgresql:postgresql:${project.postgresql_version}"
 	include "org.postgresql:postgresql:${project.postgresql_version}"
@@ -67,6 +73,10 @@ fabricApi {
 		enableClientGameTests = false
 		eula = true
 	}
+}
+
+dependencies {
+	gametestCompileOnly "maven.modrinth:jade:${project.jade_version}"
 }
 
 def gameTestReportFile = layout.buildDirectory.file('test-results/gameTest/TEST-haruhi-gametest.xml')
@@ -155,12 +165,13 @@ publishing {
 				}
 
 				withXml {
-					// GeckoLib is compile-only (client side only) and must never reach a consumer's runtime classpath.
+					// GeckoLib and Jade are compile-only and must never reach a consumer's runtime classpath.
 					def dependenciesNode = asNode().dependencies[0]
 					if (dependenciesNode != null) {
 						dependenciesNode.dependency.each { dep ->
-							if (dep.artifactId.text() == 'geckolib') {
-								throw new GradleException('GeckoLib leaked into the publication POM')
+							def id = dep.artifactId.text()
+							if (id == 'geckolib' || id == 'jade') {
+								throw new GradleException("${id} leaked into the publication POM")
 							}
 						}
 					}
@@ -180,16 +191,19 @@ publishing {
 	}
 }
 
-// Gradle consumers read the module metadata rather than the POM, so it gets the same GeckoLib check.
+// Gradle consumers read the module metadata rather than the POM, so it gets the same leak check.
 tasks.named('generateMetadataFileForMavenJavaPublication') {
 	doLast {
-		if (outputs.files.singleFile.text.contains('geckolib')) {
-			throw new GradleException('GeckoLib leaked into the publication module metadata')
+		def metadata = outputs.files.singleFile.text
+		for (def id : ['geckolib', 'jade']) {
+			if (metadata.contains(id)) {
+				throw new GradleException("${id} leaked into the publication module metadata")
+			}
 		}
 	}
 }
 
-// check generates both publication files, so ./gradlew build refuses a GeckoLib leak before any release does.
+// check generates both publication files, so ./gradlew build refuses a leak before any release does.
 tasks.named('check') {
 	dependsOn 'generatePomFileForMavenJavaPublication', 'generateMetadataFileForMavenJavaPublication'
 }

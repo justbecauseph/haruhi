@@ -9,15 +9,17 @@ import net.minecraft.resources.Identifier;
  * Who speaks for the interlocutor or the place in a conversation's nodes that name no {@code speaker} of their own, such
  * as a vanilla villager or a lectern a binding opened a graph on.
  *
- * <p>Such a node shows {@code profile}'s name and portrait, or {@code name} when there is no profile or the active
- * revision lacks it. When the conversation has an interlocutor, that entity is the speaker of those nodes and of nodes
- * whose {@code speaker} is {@code profile}, so the dialogue screen draws its head when no portrait applies.
+ * <p>Such a node shows {@code profile}'s name and portrait, or the graph's {@code speaker_name} when there is no
+ * profile or the active revision lacks it, else {@code name}. When the conversation has an interlocutor, that entity is
+ * the speaker of those nodes and of nodes whose {@code speaker} is {@code profile}, so the dialogue screen draws its
+ * head when no portrait applies.
  *
  * <p>{@link #NONE} keeps the default: a {@code haruhi:npc} interlocutor speaks with its own profile, and any other
- * conversation shows no speaker for such nodes.
+ * conversation shows no speaker for such nodes unless the graph sets {@code speaker_name}.
  *
  * @param profile an NPC profile id of the active content, which also keys the conversation's visit count
- * @param name shown when there is no profile, or the active revision lacks it
+ * @param name shown when there is no profile (or the active revision lacks it) and the graph sets no
+ *     {@code speaker_name}
  */
 public record DialogueSpeaker(Optional<Identifier> profile, Optional<Component> name) {
     /** No speaker of its own: the interlocutor NPC's profile, if any, speaks. */

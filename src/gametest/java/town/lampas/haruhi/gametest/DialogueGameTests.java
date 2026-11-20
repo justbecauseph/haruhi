@@ -69,6 +69,7 @@ import town.lampas.haruhi.dialogue.api.DialogueCondition;
 import town.lampas.haruhi.dialogue.api.DialogueContext;
 import town.lampas.haruhi.dialogue.api.DialogueFlags;
 import town.lampas.haruhi.dialogue.api.DialogueRegistries;
+import town.lampas.haruhi.dialogue.api.DialogueSpeaker;
 import town.lampas.haruhi.dialogue.api.ParseContext;
 import town.lampas.haruhi.dialogue.builtin.Builtins;
 import town.lampas.haruhi.dialogue.flags.CharacterStore;
@@ -825,6 +826,30 @@ public final class DialogueGameTests {
                     helper.assertTrue(held.session(subject.player).isEmpty(),
                             "the queued open was dropped: the player had left the anchor");
                     held.onLeave(subject.player);
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aGraphsSpeakerNameOverridesTheSessionSpeakersFallbackName(GameTestHelper helper) {
+        Subject subject = new Subject();
+        Identifier named = Identifier.fromNamespaceAndPath("haruhi", "fixture/named");
+        helper.startSequence()
+                .thenWaitUntil(() -> requireStartupComplete(helper))
+                .thenExecute(() -> subject.client = joinClient(helper, UUID.randomUUID()))
+                .thenWaitUntil(() -> flagsOf(helper, subject.client.player()))
+                .thenExecute(() -> {
+                    ServerPlayer player = subject.client.player();
+                    activateFixture(helper);
+                    subject.client.dialogsSent();
+                    DialogueSpeaker fallback = DialogueSpeaker.of(Optional.empty(), Component.literal("Chest"));
+                    helper.assertTrue(sessions().openAt(player, named, anchorAtPlayer(player, 4.0), fallback),
+                            "the named fixture graph should open");
+                    List<Dialog> sent = subject.client.dialogsSent();
+                    helper.assertValueEqual(sent.size(), 1, "one dialog is sent");
+                    helper.assertValueEqual(sent.get(0).common().title().getString(), "Crystal Ball",
+                            "the dialog title uses the graph's speaker_name override");
+                    sessions().close(player);
                 })
                 .thenSucceed();
     }

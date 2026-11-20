@@ -13,16 +13,24 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * The server never loads GeckoLib (the Lampas pack ships it client side) and never has client classes, so no compiled
- * class outside {@code town/lampas/haruhi/client/} may reference {@code com/geckolib} or {@code net/minecraft/client}.
+ * The server never loads GeckoLib (the Lampas pack ships it client side) and never has client classes, and Jade is an
+ * optional dependency:
+ * <ul>
+ *   <li>no compiled class outside {@code town/lampas/haruhi/client/} may reference {@code com/geckolib/} or
+ *       {@code net/minecraft/client/};</li>
+ *   <li>no compiled class outside {@code town/lampas/haruhi/compat/jade/} and {@code town/lampas/haruhi/client/jade/}
+ *       may reference {@code snownee/jade/}.</li>
+ * </ul>
  * Reads the class files' constant pools as bytes, which is enough to find the internal names.
  */
 class ArchitectureTest {
     private static final String CLIENT_PACKAGE = "town/lampas/haruhi/client/";
+    private static final String JADE_COMMON_PACKAGE = "town/lampas/haruhi/compat/jade/";
+    private static final String JADE_CLIENT_PACKAGE = "town/lampas/haruhi/client/jade/";
     private static final List<String> CLIENT_ONLY = List.of("com/geckolib/", "net/minecraft/client/");
 
     @Test
-    void commonClassesDoNotReferenceClientOnlyCode() throws IOException {
+    void boundaryRulesHoldAcrossCompiledMainClasses() throws IOException {
         String dirs = System.getProperty("haruhi.mainClasses");
         assertTrue(dirs != null && !dirs.isBlank(), "haruhi.mainClasses is not set by the build");
         List<String> violations = new ArrayList<>();
@@ -34,18 +42,21 @@ class ArchitectureTest {
             try (Stream<Path> files = Files.walk(root)) {
                 for (Path file : files.filter(p -> p.toString().endsWith(".class")).toList()) {
                     String name = root.relativize(file).toString().replace(File.separatorChar, '/');
-                    if (name.startsWith(CLIENT_PACKAGE)) {
-                        continue;
-                    }
                     String bytes = new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1);
-                    for (String forbidden : CLIENT_ONLY) {
-                        if (bytes.contains(forbidden)) {
-                            violations.add(name + " references " + forbidden);
+                    if (!name.startsWith(CLIENT_PACKAGE)) {
+                        for (String forbidden : CLIENT_ONLY) {
+                            if (bytes.contains(forbidden)) {
+                                violations.add(name + " references " + forbidden);
+                            }
                         }
+                    }
+                    if (!name.startsWith(JADE_COMMON_PACKAGE) && !name.startsWith(JADE_CLIENT_PACKAGE)
+                            && bytes.contains("snownee/jade/")) {
+                        violations.add(name + " references snownee/jade/");
                     }
                 }
             }
         }
-        assertTrue(violations.isEmpty(), "Common classes reference client-only code:\n" + String.join("\n", violations));
+        assertTrue(violations.isEmpty(), "Package boundary violations:\n" + String.join("\n", violations));
     }
 }

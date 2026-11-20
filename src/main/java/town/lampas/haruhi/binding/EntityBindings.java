@@ -3,6 +3,7 @@ package town.lampas.haruhi.binding;
 import java.util.Objects;
 import java.util.Optional;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry;
+import net.fabricmc.fabric.api.attachment.v1.AttachmentSyncPredicate;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
 import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
@@ -10,9 +11,9 @@ import town.lampas.haruhi.Haruhi;
 
 /**
  * Entity bindings, held as the persistent Fabric data attachment {@code haruhi:binding} on the entity. The binding is
- * saved with the entity and moves with it, across dimensions too, and goes when the entity dies or is discarded. It is
- * not copied on a mob conversion (a villager struck by lightning, a zombie villager cured), and it is not synced to
- * clients. {@link EntityBindingEnds} logs each of these ends. Server thread only.
+ * saved with the entity and moves with it, across dimensions too, goes when the entity dies or is discarded, and is
+ * synced to tracking clients. It is not copied on a mob conversion (a villager struck by lightning, a zombie villager
+ * cured). {@link EntityBindingEnds} logs each of these ends. Mutations run on the server thread only.
  */
 public final class EntityBindings {
     private static @Nullable AttachmentType<Binding> type;
@@ -21,7 +22,9 @@ public final class EntityBindings {
 
     /** Registers the attachment type. Called once from {@link BindingModule#init}. */
     static void register() {
-        type = AttachmentRegistry.create(Haruhi.id("binding"), builder -> builder.persistent(Binding.CODEC));
+        type = AttachmentRegistry.create(Haruhi.id("binding"), builder -> builder
+                .persistent(Binding.CODEC)
+                .syncWith(Binding.STREAM_CODEC, AttachmentSyncPredicate.all()));
     }
 
     public static Optional<Binding> get(Entity entity) {

@@ -101,4 +101,17 @@ class DialogueNodePayloadsTest {
 
         assertEquals(Optional.empty(), payload.portrait());
     }
+
+    @Test
+    void aGraphsSpeakerNameReachesThePayloadAndIsResolved() {
+        ContentBundle content = new ContentBundle(ContentBundle.SCHEMA, Map.of(), Map.of(), Map.of());
+        CompiledGraph graph = new CompiledGraph(GRAPH, "hello", Map.of(),
+                Optional.of(Component.literal("Crystal Ball")));
+        DialogueSession session = new DialogueSession(1, null, null, content, graph, null, 1, null);
+
+        DialogueNodePayload payload = DialogueNodePayloads.node(
+                session, presented(Optional.empty(), Optional.empty()), MARKING);
+
+        assertEquals("resolved Crystal Ball", payload.speakerName().getString());
+    }
 }

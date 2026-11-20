@@ -386,6 +386,13 @@
         },
         "bye": { "text": "Spent." }
       }
+    },
+    "haruhi:fixture/named": {
+      "start": "line",
+      "speaker_name": "Crystal Ball",
+      "nodes": {
+        "line": { "text": "I'm a crystal ball." }
+      }
     }
   }
 }

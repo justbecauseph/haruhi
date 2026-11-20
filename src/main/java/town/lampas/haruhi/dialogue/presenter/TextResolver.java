@@ -30,7 +30,7 @@ import town.lampas.haruhi.dialogue.runtime.VisibleChoice;
  * a part that fails (a score whose name matches more than one entity, say) is sent as written, and the other parts are
  * still resolved. A score that does not resolve shows as nothing.
  */
-final class TextResolver {
+public final class TextResolver {
     /** Leaves text as written, for building payloads without a player (unit tests). */
     static final TextResolver AS_WRITTEN = new TextResolver(UnaryOperator.identity());
 
@@ -54,6 +54,11 @@ final class TextResolver {
                 .withSuppressedOutput();
         ResolutionContext context = ResolutionContext.create(source);
         return new TextResolver(text -> resolveParts(context, text));
+    }
+
+    /** Resolves one bundle text component for {@code player} at gamemaster permission, with output suppressed. */
+    public static Component resolveFor(ServerPlayer player, Component text) {
+        return forPlayer(player).resolve(text);
     }
 
     /** Bundle text, resolved. */

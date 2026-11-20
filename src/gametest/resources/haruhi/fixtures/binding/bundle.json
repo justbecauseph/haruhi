@@ -12,6 +12,20 @@
       "nodes": {
         "hello": { "text": "You found a bound conversation." }
       }
+    },
+    "haruhi:fixture/named": {
+      "start": "hello",
+      "speaker_name": "Crystal Ball",
+      "nodes": {
+        "hello": { "text": "I'm a crystal ball." }
+      }
+    },
+    "haruhi:fixture/named_score": {
+      "start": "hello",
+      "speaker_name": { "score": { "name": "@s", "objective": "haruhi_jade_score" } },
+      "nodes": {
+        "hello": { "text": "Your score speaks." }
+      }
     }
   }
 }

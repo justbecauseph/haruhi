@@ -2,8 +2,11 @@ package town.lampas.haruhi.binding;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import io.netty.buffer.ByteBuf;
 import java.util.Objects;
 import java.util.Optional;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -17,6 +20,13 @@ public record Binding(Identifier graph, Optional<Identifier> speaker) {
             Identifier.CODEC.fieldOf("graph").forGetter(Binding::graph),
             Identifier.CODEC.optionalFieldOf("speaker").forGetter(Binding::speaker)
     ).apply(instance, Binding::new));
+
+    public static final StreamCodec<ByteBuf, Binding> STREAM_CODEC = StreamCodec.composite(
+            Identifier.STREAM_CODEC,
+            Binding::graph,
+            ByteBufCodecs.optional(Identifier.STREAM_CODEC),
+            Binding::speaker,
+            Binding::new);
 
     public Binding {
         Objects.requireNonNull(graph, "graph");

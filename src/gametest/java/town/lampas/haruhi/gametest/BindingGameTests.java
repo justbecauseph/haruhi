@@ -53,21 +53,35 @@ import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.Property;
+import snownee.jade.api.BlockAccessor;
+import snownee.jade.api.EntityAccessor;
+import snownee.jade.impl.BlockAccessorImpl;
+import snownee.jade.impl.EntityAccessorImpl;
+import snownee.jade.impl.WailaCommonRegistration;
 import town.lampas.haruhi.Haruhi;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.binding.Binding;
+import town.lampas.haruhi.binding.BindingNames;
 import town.lampas.haruhi.binding.BlockBindings;
+import town.lampas.haruhi.binding.BoundBlockHints;
+import town.lampas.haruhi.binding.BoundBlockSync;
 import town.lampas.haruhi.binding.EntityBindings;
+import town.lampas.haruhi.compat.jade.HaruhiJadePlugin;
 import town.lampas.haruhi.content.model.ContentBundle;
 import town.lampas.haruhi.dialogue.DialogueModule;
 import town.lampas.haruhi.dialogue.api.DialogueSpeaker;
 import town.lampas.haruhi.dialogue.runtime.DialogueSession;
+import town.lampas.haruhi.network.BoundBlocksPayload;
 import town.lampas.haruhi.npc.NpcEntities;
 import town.lampas.haruhi.npc.NpcEntity;
 
@@ -82,6 +96,8 @@ import town.lampas.haruhi.npc.NpcEntity;
 @SuppressWarnings("removal")
 public final class BindingGameTests {
     private static final Identifier BOUND = Identifier.fromNamespaceAndPath("haruhi", "fixture/bound");
+    private static final Identifier NAMED = Identifier.fromNamespaceAndPath("haruhi", "fixture/named");
+    private static final Identifier NAMED_SCORE = Identifier.fromNamespaceAndPath("haruhi", "fixture/named_score");
     private static final Identifier CLERK = Identifier.fromNamespaceAndPath("haruhi", "fixture/bound_clerk");
     private static final String FIXTURE = "/haruhi/fixtures/binding/bundle.json";
     private static final String WITHOUT_GRAPH = "/haruhi/fixtures/binding/bundle_without_graph.json";
@@ -89,6 +105,7 @@ public final class BindingGameTests {
     private static final Vec3 VILLAGER_AT = new Vec3(2.5, 1.0, 4.5);
     private static final BlockPos DOOR_AT = new BlockPos(1, 1, 4);
     private static final BlockPos BED_FOOT_AT = new BlockPos(5, 1, 3);
+    private static final BlockPos STONE_AT = new BlockPos(4, 1, 4);
 
     static {
         // Before any test runs, so the first binding end of the run is already recorded.
@@ -132,6 +149,26 @@ public final class BindingGameTests {
                     helper.assertFalse(HaruhiServices.dialogue().isInDialogue(scene.player),
                             "an unbound chest opens no conversation");
                     scene.player.closeContainer();
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(maxTicks = 200)
+    public void aBoundBlockUsesTheGraphsSpeakerNameOverride(GameTestHelper helper) {
+        Scene scene = new Scene();
+        join(helper, scene)
+                .thenExecute(() -> {
+                    BlockPos chest = placeChest(helper);
+                    activate(helper, FIXTURE);
+                    command(helper, "haruhi bind block " + coords(chest) + " " + NAMED);
+                    useBlock(scene.player, chest, InteractionHand.MAIN_HAND);
+                    Optional<DialogueSession> session = DialogueModule.sessions().session(scene.player);
+                    helper.assertTrue(session.isPresent(), "the bound chest opens a conversation");
+                    helper.assertValueEqual(session.get().graphId(), NAMED, "the graph of the conversation");
+                    helper.assertValueEqual(session.get().graph().speakerName().map(Component::getString),
+                            Optional.of("Crystal Ball"), "the graph's speaker_name override");
+                    HaruhiServices.dialogue().close(scene.player);
+                    command(helper, "haruhi unbind block " + coords(chest));
                 })
                 .thenSucceed();
     }
@@ -509,6 +546,188 @@ public final class BindingGameTests {
                     moved.discard();
                 })
                 .thenSucceed();
+    }
+
+    /**
+     * Jade's server data providers and hint sync supply the active {@code speaker_name} override for bound blocks
+     * (including non-BlockEntity blocks, double chests, and dynamic text) and suppress it when replaced or using an NPC
+     * speaker profile.
+     */
+    @GameTest(maxTicks = 200)
+    public void jadeBlockOverrideAppliesToNonBlockEntitiesDoubleChestsAndDynamicText(GameTestHelper helper) {
+        Scene scene = new Scene();
+        join(helper, scene)
+                .thenExecute(() -> {
+                    ServerLevel level = helper.getLevel();
+                    try {
+                        helper.setBlock(STONE_AT, Blocks.STONE);
+                        BlockPos stonePos = helper.absolutePos(STONE_AT);
+                        activate(helper, FIXTURE);
+
+                        helper.assertTrue(WailaCommonRegistration.instance()
+                                        .blockDataProvidersOf(Blocks.STONE.defaultBlockState(), null, false)
+                                        .contains(HaruhiJadePlugin.BlockDataProvider.INSTANCE),
+                                "Jade registered Haruhi's block data provider");
+
+                        command(helper, "haruhi bind block " + coords(stonePos) + " " + NAMED);
+                        helper.assertValueEqual(
+                                BindingNames.blockNameOverride(level, stonePos, level.getBlockState(stonePos), scene.player)
+                                        .map(Component::getString),
+                                Optional.of("Crystal Ball"),
+                                "blockNameOverride on bound stone");
+                        Component streamed = HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
+                                blockAccessor(level, scene.player, stonePos));
+                        helper.assertValueEqual(streamed == null ? null : streamed.getString(), "Crystal Ball",
+                                "Jade BlockDataProvider.streamData on bound stone");
+
+                        BoundBlocksPayload payload = BoundBlockSync.payloadFor(level, HaruhiServices.content().active());
+                        helper.assertValueEqual(payload.blocks(),
+                                List.of(new BoundBlocksPayload.Entry(stonePos,
+                                        Identifier.withDefaultNamespace("stone"))),
+                                "BoundBlockSync includes the bound stone");
+                        BoundBlockHints.apply(payload);
+                        helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.shouldRequestData(
+                                        blockAccessor(level, scene.player, stonePos)),
+                                "shouldRequestData is true when the synced stone is targeted");
+
+                        // Temporarily replacing the block hides both the hint match and the server override.
+                        helper.setBlock(STONE_AT, Blocks.OAK_PLANKS);
+                        helper.assertFalse(HaruhiJadePlugin.BlockDataProvider.INSTANCE.shouldRequestData(
+                                        blockAccessor(level, scene.player, stonePos)),
+                                "shouldRequestData is false when another block stands at the position");
+                        helper.assertTrue(BindingNames.blockNameOverride(level, stonePos, level.getBlockState(stonePos),
+                                scene.player).isEmpty(), "blockNameOverride is empty when another block stands there");
+                        helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
+                                blockAccessor(level, scene.player, stonePos)) == null,
+                                "streamData is null when another block stands there");
+
+                        // A graph without speaker_name or with a loaded NPC speaker suppresses the override.
+                        helper.setBlock(STONE_AT, Blocks.STONE);
+                        command(helper, "haruhi bind block " + coords(stonePos) + " " + BOUND);
+                        helper.assertValueEqual(BoundBlockSync.payloadFor(level, HaruhiServices.content().active()).blocks(),
+                                List.of(), "plain graph without speaker_name is omitted from hint sync");
+                        helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
+                                blockAccessor(level, scene.player, stonePos)) == null,
+                                "streamData is null for a graph without speaker_name");
+
+                        command(helper, "haruhi bind block " + coords(stonePos) + " " + NAMED + " " + CLERK);
+                        helper.assertValueEqual(BoundBlockSync.payloadFor(level, HaruhiServices.content().active()).blocks(),
+                                List.of(), "NPC speaker profile suppresses speaker_name in hint sync");
+                        helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
+                                blockAccessor(level, scene.player, stonePos)) == null,
+                                "streamData is null when a loaded NPC profile speaks");
+
+                        // Dynamic text components in speaker_name resolve for the viewer.
+                        Scoreboard scoreboard = level.getServer().getScoreboard();
+                        Objective objective = scoreboard.getObjective("haruhi_jade_score");
+                        if (objective == null) {
+                            objective = scoreboard.addObjective("haruhi_jade_score", ObjectiveCriteria.DUMMY,
+                                    Component.literal("Jade Score"), ObjectiveCriteria.RenderType.INTEGER, false, null);
+                        }
+                        try {
+                            scoreboard.getOrCreatePlayerScore(scene.player, objective).set(42);
+                            command(helper, "haruhi bind block " + coords(stonePos) + " " + NAMED_SCORE);
+                            Component scoreName = HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
+                                    blockAccessor(level, scene.player, stonePos));
+                            helper.assertValueEqual(scoreName == null ? null : scoreName.getString(), "42",
+                                    "score component in speaker_name resolves for the viewer");
+                        } finally {
+                            scoreboard.removeObjective(objective);
+                        }
+                        command(helper, "haruhi unbind block " + coords(stonePos));
+
+                        // Double chests expose the override on both halves even when only one half is bound.
+                        BlockState left = Blocks.CHEST.defaultBlockState()
+                                .setValue(ChestBlock.FACING, Direction.NORTH).setValue(ChestBlock.TYPE, ChestType.LEFT);
+                        helper.setBlock(CHEST_AT, left);
+                        BlockPos leftPos = helper.absolutePos(CHEST_AT);
+                        BlockPos rightPos = ChestBlock.getConnectedBlockPos(leftPos, left);
+                        level.setBlockAndUpdate(rightPos, left.setValue(ChestBlock.TYPE, ChestType.RIGHT));
+                        command(helper, "haruhi bind block " + coords(leftPos) + " " + NAMED);
+                        BoundBlockHints.apply(BoundBlockSync.payloadFor(level, HaruhiServices.content().active()));
+                        for (BlockPos half : List.of(leftPos, rightPos)) {
+                            helper.assertTrue(BoundBlockHints.hasOverride(level, half, level.getBlockState(half)),
+                                    "BoundBlockHints matches double chest half " + half);
+                            Component halfName = HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
+                                    blockAccessor(level, scene.player, half));
+                            helper.assertValueEqual(halfName == null ? null : halfName.getString(), "Crystal Ball",
+                                    "streamData matches double chest half " + half);
+                        }
+                        command(helper, "haruhi unbind block " + coords(leftPos));
+                    } finally {
+                        BoundBlockHints.clear();
+                    }
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * Jade's entity data provider supplies the {@code speaker_name} override when a bound entity has no loaded NPC
+     * speaker profile, and omits it when unbound, speaking as an NPC profile, or using a graph without override.
+     */
+    @GameTest(maxTicks = 200)
+    public void jadeEntityOverrideAppliesWithoutNpcProfile(GameTestHelper helper) {
+        Scene scene = new Scene();
+        join(helper, scene)
+                .thenExecute(() -> {
+                    ServerLevel level = helper.getLevel();
+                    Villager villager = spawnLibrarian(helper);
+                    activate(helper, FIXTURE);
+
+                    helper.assertTrue(WailaCommonRegistration.instance().entityDataProvidersOf(villager)
+                                    .contains(HaruhiJadePlugin.EntityDataProvider.INSTANCE),
+                            "Jade registered Haruhi's entity data provider");
+
+                    EntityAccessor unboundAccessor = entityAccessor(level, scene.player, villager);
+                    helper.assertFalse(HaruhiJadePlugin.EntityDataProvider.INSTANCE.shouldRequestData(unboundAccessor),
+                            "unbound entity does not request Jade server data");
+                    helper.assertTrue(HaruhiJadePlugin.EntityDataProvider.INSTANCE.streamData(unboundAccessor) == null,
+                            "unbound entity streams null");
+
+                    command(helper, "haruhi bind entity " + villager.getStringUUID() + " " + NAMED);
+                    EntityAccessor namedAccessor = entityAccessor(level, scene.player, villager);
+                    helper.assertTrue(HaruhiJadePlugin.EntityDataProvider.INSTANCE.shouldRequestData(namedAccessor),
+                            "bound entity requests Jade server data");
+                    Component overrideName = HaruhiJadePlugin.EntityDataProvider.INSTANCE.streamData(namedAccessor);
+                    helper.assertValueEqual(overrideName == null ? null : overrideName.getString(), "Crystal Ball",
+                            "bound entity without speaker profile streams speaker_name override");
+
+                    command(helper, "haruhi bind entity " + villager.getStringUUID() + " " + NAMED + " " + CLERK);
+                    helper.assertTrue(HaruhiJadePlugin.EntityDataProvider.INSTANCE.streamData(
+                            entityAccessor(level, scene.player, villager)) == null,
+                            "bound entity with NPC profile streams null");
+
+                    command(helper, "haruhi bind entity " + villager.getStringUUID() + " " + BOUND);
+                    helper.assertTrue(HaruhiJadePlugin.EntityDataProvider.INSTANCE.streamData(
+                            entityAccessor(level, scene.player, villager)) == null,
+                            "bound entity without speaker_name streams null");
+
+                    command(helper, "haruhi unbind entity " + villager.getStringUUID());
+                    villager.discard();
+                })
+                .thenSucceed();
+    }
+
+    private static BlockAccessor blockAccessor(ServerLevel level, ServerPlayer player, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return new BlockAccessorImpl.Builder()
+                .level(level)
+                .player(player)
+                .serverData(new CompoundTag())
+                .hit(new BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false))
+                .blockState(state)
+                .blockEntity(level.getBlockEntity(pos))
+                .build();
+    }
+
+    private static EntityAccessor entityAccessor(ServerLevel level, ServerPlayer player, Entity entity) {
+        return new EntityAccessorImpl.Builder()
+                .level(level)
+                .player(player)
+                .serverData(new CompoundTag())
+                .hit(new EntityHitResult(entity, entity.position()))
+                .entity(entity)
+                .build();
     }
 
     /** The test's player, joined and standing in the test structure. */

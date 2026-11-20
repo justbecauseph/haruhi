@@ -225,6 +225,7 @@ final class BindingInteractions {
             return;
         }
         BlockBinding removed = bindings.remove(pos).orElseThrow();
+        BoundBlockSync.syncLevel(level);
         String where = String.format(Locale.ROOT, "%d %d %d in %s", pos.getX(), pos.getY(), pos.getZ(),
                 level.dimension().identifier());
         Haruhi.LOGGER.info("Removed the Haruhi binding of {} at {}: {} broke the block", removed.graph(), where,

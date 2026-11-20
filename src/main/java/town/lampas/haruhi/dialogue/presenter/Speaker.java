@@ -26,8 +26,8 @@ record Speaker(Component name, OptionalInt entityId, Optional<Identifier> portra
         Optional<Identifier> interlocutorProfile = interlocutor == null
                 ? Optional.empty()
                 : HaruhiServices.npc().profileId(interlocutor);
-        Voice voice = resolve(node.speaker(), session.speaker(), interlocutor != null, interlocutorProfile,
-                session.content().npcs());
+        Voice voice = resolve(node.speaker(), session.speaker(), session.graph().speakerName(),
+                interlocutor != null, interlocutorProfile, session.content().npcs());
         return new Speaker(voice.name(),
                 voice.interlocutorSpeaks() ? OptionalInt.of(interlocutor.getId()) : OptionalInt.empty(),
                 voice.portrait());
@@ -36,17 +36,20 @@ record Speaker(Component name, OptionalInt entityId, Optional<Identifier> portra
     /**
      * The rules of {@link #of} without an entity. The conversation's own voice is the session speaker's profile, else
      * the interlocutor NPC's. A node without a {@code speaker}, or whose {@code speaker} is that voice, speaks with it:
-     * the profile's name and portrait, else the session speaker's name, and the interlocutor speaks when the
-     * conversation has a voice at all. Any other node speaks as its own profile, without the interlocutor.
+     * the profile's name and portrait, else the graph's {@code speaker_name}, else the session speaker's name, and the
+     * interlocutor speaks when the conversation has a voice at all. Any other node speaks as its own profile, without
+     * the interlocutor.
      */
-    static Voice resolve(Optional<Identifier> nodeSpeaker, DialogueSpeaker session, boolean hasInterlocutor,
-            Optional<Identifier> interlocutorProfile, Map<Identifier, NpcProfile> profiles) {
+    static Voice resolve(Optional<Identifier> nodeSpeaker, DialogueSpeaker session, Optional<Component> graphSpeakerName,
+            boolean hasInterlocutor, Optional<Identifier> interlocutorProfile, Map<Identifier, NpcProfile> profiles) {
         Optional<Identifier> own = session.profile().or(() -> interlocutorProfile);
         Optional<Identifier> profile = nodeSpeaker.or(() -> own);
         Optional<NpcProfile> speaking = profile.map(profiles::get);
         boolean ownVoice = nodeSpeaker.isEmpty() || nodeSpeaker.equals(own);
         Component name = speaking.map(NpcProfile::name)
-                .orElseGet(() -> ownVoice ? session.name().orElse(Component.empty()) : Component.empty());
+                .orElseGet(() -> ownVoice
+                        ? graphSpeakerName.or(session::name).orElse(Component.empty())
+                        : Component.empty());
         boolean interlocutorSpeaks = hasInterlocutor && ownVoice && (own.isPresent() || session.name().isPresent());
         return new Voice(name, interlocutorSpeaks, speaking.flatMap(NpcProfile::portrait));
     }

@@ -209,6 +209,7 @@ A graph is one conversation: named nodes and the node it starts at.
 | Graph field | Required | Meaning |
 |---|---|---|
 | `start` | yes | The id of the first node. |
+| `speaker_name` | no | Text component shown as the speaker name on nodes that have no speaking NPC profile, overriding a bound block's or entity's own name (and naming a graph opened by command). |
 | `nodes` | yes | Node ids mapped to node objects. Every node must be reachable from `start` (see [Validation](#validation)). |
 
 ### Nodes
@@ -240,11 +241,12 @@ reachability check counts a router's `next` only when every branch has `only_if`
 `speaker`, `portrait` and `animation` work together:
 
 - With no `speaker`, the NPC the player is talking to speaks. A conversation opened by command has no NPC, so its
-  nodes show no name unless they set `speaker`.
+  nodes show the graph's `speaker_name` when set, else no name unless they set `speaker`.
 - A graph bound to a block or entity (see [Bindings](#bindings-blocks-and-entities)) is spoken, on nodes with no
-  `speaker`, by the binding's speaker profile, or without one by the block or entity itself under its own name, such
-  as "Lectern" or "Librarian". A bound living entity (a villager, an armor stand, a mob) is drawn as the 3D head;
-  other entities, such as an `interaction` entity or an item frame, and blocks have none.
+  `speaker`, by the binding's speaker profile, or without one (or when that profile is absent) by the graph's
+  `speaker_name` if set, else by the block or entity itself under its own name, such as "Lectern" or "Librarian". A
+  bound living entity (a villager, an armor stand, a mob) is drawn as the 3D head; other entities, such as an
+  `interaction` entity or an item frame, and blocks have none.
 - The 3D head render in the dialogue box applies when the speaker is the entity being talked to, and the node's
   `animation` only when that entity is a Haruhi NPC. A node whose `speaker` is a different profile shows that profile's
   name and its `portrait` if it has one, and no 3D head.
@@ -413,7 +415,8 @@ Bindings live in the world, not in the bundle, so the bundle format has nothing 
   nothing, so keep its id when you rework it.
 - The optional speaker profile given when binding. Nodes with no `speaker` show its name and portrait, and visits count
   under it, so a villager bound with the profile `shop:mira` is Mira for `haruhi:visits`. Without one, those nodes
-  show the block's or entity's own name, and visits count under `haruhi:none`.
+  show the graph's `speaker_name` if set (also replacing the block's or entity's name in Jade's tooltip when Jade is
+  installed), else the block's or entity's own name, and visits count under `haruhi:none`.
 - `haruhi:open`, `haruhi:goto` and the rest work as in any conversation. A graph chained with `haruhi:open` keeps the
   block or entity and the speaker. `haruhi:animation` and a node's `animation` play only on Haruhi NPCs, so they do
   nothing in a bound conversation.

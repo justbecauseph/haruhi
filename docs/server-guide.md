@@ -594,8 +594,9 @@ conversation, as with an NPC.
 
 `<graph>` must be a graph of the active content, and `<speaker>`, when given, an NPC profile of it; tab completion
 lists both. `<speaker>` names the character that speaks for the block or entity: its name and portrait show on nodes
-that name no `speaker`, and visits count under it. Without it the block's or entity's own name shows, such as
-"Lectern", "Librarian" or a name tag's name. `<pos>` must be a loaded block that is not air. Replies:
+that name no `speaker`, and visits count under it. Without it the graph's `speaker_name` shows if set, else the block's
+or entity's own name, such as "Lectern", "Librarian" or a name tag's name. `<pos>` must be a loaded block that is not
+air. Replies:
 
 ```
 > /haruhi bind block 12 64 -3 haruhi:example/greeter
@@ -640,8 +641,10 @@ bound.
 - An entity conversation is tied to the entity: it ends when the entity is more than 8 blocks from the player, dies or
   changes dimension, or when the player dies or leaves. The entity keeps doing what it does, so give a mob that should
   stay put `NoAI`. Actions that need a Haruhi NPC, such as `haruhi:animation`, do nothing on other entities.
-- The client does not know the bindings, so for a moment it may show its own guess of the vanilla result, such as a
-  door swinging open; the server's block update puts it back.
+- The client does not know the bindings for interaction prediction, so for a moment it may show its own guess of the
+  vanilla result, such as a door swinging open; the server's block update puts it back. Entity bindings and block
+  `speaker_name` override hints are still synced so optional HUD overlays such as Jade can replace the target's name
+  when a player looks at it, without sending extra requests for unbound blocks or entities.
 - Block bindings are saved per dimension, in that dimension's `data/haruhi/block_bindings.dat`. A binding records the
   block that was there when it was bound and applies only while that block is at the position, in any state (a
   furnace that lights, a door that opens). A player who breaks the block removes its binding. The log shows

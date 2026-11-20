@@ -14,7 +14,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
  * The other half of a block that takes two positions, so that one binding covers the whole block: a door or a tall
  * plant (the lower and upper half), a bed (the foot and the head), a double chest (its left and right chest).
  */
-final class BlockParts {
+public final class BlockParts {
     private BlockParts() {}
 
     /**
@@ -43,7 +43,7 @@ final class BlockParts {
      * {@link #otherHalf} names, and pointing back at {@code pos}. Empty when the block takes one position or its other
      * half is gone.
      */
-    static Optional<BlockPos> connectedHalf(BlockGetter level, BlockPos pos, BlockState state) {
+    public static Optional<BlockPos> connectedHalf(BlockGetter level, BlockPos pos, BlockState state) {
         return otherHalf(pos, state).filter(other -> {
             BlockState otherState = level.getBlockState(other);
             return otherState.is(state.getBlock()) && otherHalf(other, otherState).filter(pos::equals).isPresent();
