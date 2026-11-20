@@ -780,10 +780,11 @@ Layout:
 - Right of the headshot: the speaker's name, a divider, and the text, which types out character by character. The box
   grows with the text up to two fifths of the screen's height (or a full headshot's height, where that is more),
   and never into the room left above it for the choices.
-- Text longer than the box holds is split into pages, so a long speech can stay in one node; you never need to know
-  the box's size. Pages break between whole lines, and at a blank line (a paragraph break) when one falls in the lower
-  half of the page. Each page types out on its own, and a page indicator such as `1/3` shows at the bottom right. How
-  many pages a text takes depends on the player's window and GUI scale, so do not write text that refers to a page.
+- Blank lines (`\n\n`, or a line with only spaces) start a new continuation page in the same node, while single line
+  breaks (`\n`) stay on the same page. A panel longer than the box holds also splits into pages between whole lines,
+  and the box sizes to fit the tallest panel (up to its maximum height). Each page types out on its own, and a page
+  indicator such as `1/3` shows at the bottom right. How many pages a long panel overflows into depends on the player's
+  window and GUI scale, so do not refer to overflow page numbers in text.
 - Choices stack above the box on the right, once the last page is shown. The first nine are numbered `1.` to `9.`.
   Each label is one line, and a label too long for its row is cut short, so keep choice text short. Grayed-out choices
   are dimmed. When there are more choices than fit, the list scrolls and arrows mark the hidden ones.

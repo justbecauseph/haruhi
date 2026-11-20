@@ -16,8 +16,8 @@ import java.util.function.IntUnaryOperator;
  * @param nameY the top of the name line; the screen draws the name and divider only when the node names a speaker
  * @param dividerY the pixel row of the one-pixel divider under the name
  * @param textY the top of the first text line
- * @param lineCount how many lines the text wrapped to at {@link #textWidth}
- * @param pageLines how many lines the box holds, at least 1; text with more lines than this is shown in pages
+ * @param lineCount how many lines the box sized for at {@link #textWidth} (the tallest panel's wrapped line count)
+ * @param pageLines how many lines the box holds, at least 1; panels with more lines than this are shown in pages
  */
 record DialogueLayout(
         int boxX,
@@ -74,7 +74,7 @@ record DialogueLayout(
      * @param fontHeight the height of a line of the font, for the name line
      * @param lineHeight the distance from one text line to the next
      * @param choiceRoom the height to keep free above the box for the choices
-     * @param linesForWidth how many lines the text wraps to at a given width
+     * @param linesForWidth how many lines the box needs to fit at a given width (the tallest panel's wrapped line count)
      */
     static DialogueLayout compute(int screenWidth, int screenHeight, boolean headshot, boolean name, int fontHeight,
                                   int lineHeight, int choiceRoom, IntUnaryOperator linesForWidth) {

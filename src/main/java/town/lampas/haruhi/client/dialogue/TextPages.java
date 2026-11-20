@@ -2,14 +2,18 @@ package town.lampas.haruhi.client.dialogue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 
 /**
- * The pages of a node's text in the {@link DialogueScreen}. The screen wraps the text to the box's text column, and when it
- * wraps to more lines than the box holds, this splits the lines into pages of whole lines, so a page never cuts a line in
- * two. A page ends early at a blank line, the break between two paragraphs, when that leaves it at least half full, and
- * no page starts with blank lines; a text of nothing but blank lines is one page. Pure arithmetic on code points with
- * no client classes, so it is unit tested.
+ * The pages of a node's text in the {@link DialogueScreen}. Blank lines (two line breaks with only optional
+ * whitespace on the blank line) split the text into continuation panels ({@link #splitPanels}), while single line
+ * breaks stay within the same panel. The screen wraps each panel to the box's text column, and {@link #paginatePanels}
+ * starts each panel on a fresh page and splits any panel taller than the box into pages of whole lines, so a page never
+ * cuts a line in two and no page starts with blank lines; a text of nothing but blank lines is one page. Pure
+ * arithmetic and {@link FormattedText} with no client classes, so it is unit tested.
  *
  * <p>Positions are character (code point) offsets into the wrapped lines read one after another. Wrapping drops the space
  * or line break at each break, so after the text wraps to another width (a resize, another GUI scale, a headshot that
@@ -37,52 +41,141 @@ final class TextPages {
     }
 
     /**
-     * Splits wrapped lines into pages.
+     * Splits a node's text at blank lines into continuation panels, keeping single line breaks inside each panel.
+     * Leading, trailing, and consecutive blank lines produce no empty panels; empty or blank-only text yields one empty
+     * panel.
+     */
+    static List<FormattedText> splitPanels(FormattedText text) {
+        List<FormattedText> panels = new ArrayList<>();
+        List<List<FormattedText>> currentPanel = new ArrayList<>();
+        List<FormattedText> currentLine = new ArrayList<>();
+        boolean[] currentBlank = {true};
+
+        Runnable finishLine = () -> {
+            if (!currentBlank[0]) {
+                currentPanel.add(List.copyOf(currentLine));
+            } else if (!currentPanel.isEmpty()) {
+                panels.add(composePanel(currentPanel));
+                currentPanel.clear();
+            }
+            currentLine.clear();
+            currentBlank[0] = true;
+        };
+
+        text.visit((style, content) -> {
+            int start = 0;
+            int len = content.length();
+            for (int i = 0; i < len; i++) {
+                char c = content.charAt(i);
+                if (c == '\r' || c == '\n') {
+                    appendPiece(currentLine, currentBlank, style, content.substring(start, i));
+                    finishLine.run();
+                    if (c == '\r' && i + 1 < len && content.charAt(i + 1) == '\n') {
+                        i++;
+                    }
+                    start = i + 1;
+                }
+            }
+            appendPiece(currentLine, currentBlank, style, content.substring(start));
+            return Optional.empty();
+        }, Style.EMPTY);
+
+        finishLine.run();
+        if (!currentPanel.isEmpty()) {
+            panels.add(composePanel(currentPanel));
+        }
+        return panels.isEmpty() ? List.of(FormattedText.EMPTY) : List.copyOf(panels);
+    }
+
+    private static void appendPiece(List<FormattedText> line, boolean[] blank, Style style, String piece) {
+        if (piece.isEmpty()) {
+            return;
+        }
+        line.add(FormattedText.of(piece, style));
+        if (!isBlank(piece)) {
+            blank[0] = false;
+        }
+    }
+
+    private static boolean isBlank(String text) {
+        return text.codePoints().allMatch(Character::isWhitespace);
+    }
+
+    private static FormattedText composePanel(List<List<FormattedText>> lines) {
+        List<FormattedText> parts = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) {
+                parts.add(FormattedText.of("\n"));
+            }
+            parts.addAll(lines.get(i));
+        }
+        return parts.size() == 1 ? parts.getFirst() : FormattedText.composite(parts);
+    }
+
+    /**
+     * Splits wrapped lines of a single panel into pages.
      *
      * @param lines the code points of each wrapped line, top to bottom
      * @param pageLines how many lines a page holds; less than 1 counts as 1
      */
     static TextPages paginate(List<int[]> lines, int pageLines) {
-        int count = lines.size();
+        return paginatePanels(List.of(lines), pageLines);
+    }
+
+    /**
+     * Splits wrapped lines of one or more panels into pages. Each panel begins on a fresh page and splits into pages of
+     * at most {@code pageLines} lines when taller than the box; no page starts with blank lines.
+     *
+     * @param panels the code points of each wrapped line for each panel, in order
+     * @param pageLines how many lines a page holds; less than 1 counts as 1
+     */
+    static TextPages paginatePanels(List<List<int[]>> panels, int pageLines) {
+        int count = 0;
+        for (List<int[]> panel : panels) {
+            count += panel.size();
+        }
         int[] starts = new int[count + 1];
-        for (int i = 0; i < count; i++) {
-            starts[i + 1] = starts[i] + lines.get(i).length;
+        int idx = 0;
+        for (List<int[]> panel : panels) {
+            for (int[] line : panel) {
+                starts[idx + 1] = starts[idx] + line.length;
+                idx++;
+            }
         }
         boolean[] whitespace = new boolean[starts[count]];
         boolean[] blank = new boolean[count];
-        for (int i = 0; i < count; i++) {
-            int[] line = lines.get(i);
-            blank[i] = true;
-            for (int j = 0; j < line.length; j++) {
-                boolean space = Character.isWhitespace(line[j]);
-                whitespace[starts[i] + j] = space;
-                blank[i] &= space;
+        idx = 0;
+        for (List<int[]> panel : panels) {
+            for (int[] line : panel) {
+                blank[idx] = true;
+                for (int j = 0; j < line.length; j++) {
+                    boolean space = Character.isWhitespace(line[j]);
+                    whitespace[starts[idx] + j] = space;
+                    blank[idx] &= space;
+                }
+                idx++;
             }
         }
 
         int perPage = Math.max(1, pageLines);
         List<Page> pages = new ArrayList<>();
-        int line = 0;
-        while (line < count) {
-            int first = line;
-            while (first < count && blank[first]) {
-                first++;
-            }
-            if (first == count) {
-                break;
-            }
-            int end = Math.min(count, first + perPage);
-            if (end < count && !blank[end]) {
-                // The page would end inside a paragraph: end it at the last paragraph break in its lower half instead.
-                for (int b = end - 1; b >= first + (perPage + 1) / 2; b--) {
-                    if (blank[b]) {
-                        end = b;
-                        break;
-                    }
+        int offset = 0;
+        for (List<int[]> panel : panels) {
+            int sectionEnd = offset + panel.size();
+            int line = offset;
+            while (line < sectionEnd) {
+                int first = line;
+                while (first < sectionEnd && blank[first]) {
+                    first++;
                 }
+                if (first == sectionEnd) {
+                    break;
+                }
+                int end = Math.min(sectionEnd, first + perPage);
+                pages.add(new Page(first, end, starts[first], starts[end]));
+                line = end;
             }
-            pages.add(new Page(first, end, starts[first], starts[end]));
-            line = end;
+            offset = sectionEnd;
         }
         if (pages.isEmpty()) {
             pages.add(new Page(0, count, 0, starts[count]));

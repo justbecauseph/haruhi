@@ -13,6 +13,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Util;
@@ -31,7 +32,8 @@ import town.lampas.haruhi.network.DialogueNodePayload;
  * the speaker: the node's 2D portrait when it names one that exists (stretched to the square, so portrait textures
  * should be square), else a 3D render of the speaker's head and shoulders when the speaker is loaded, else nothing, and
  * the text then starts at the box's left padding. To the right of the headshot are the speaker's name, a divider and
- * the text ({@link DialogueLayout}). Text with more lines than the box holds is shown in pages ({@link TextPages}), with
+ * the text ({@link DialogueLayout}). Blank lines split the text into separate continuation pages, and any panel with
+ * more lines than the box holds is also split into pages ({@link TextPages}), with
  * a page indicator at the bottom right; turning a page does not ask the server. Each page types out at the configured
  * speed; a click, Space or Enter finishes it, and once it is finished a further press turns to the next page, or on the
  * last page continues when the node has no choices. Choices stack above the box on the right once the last page is
@@ -186,10 +188,15 @@ public final class DialogueScreen extends Screen {
         // Leave room above the box for a few choice rows, so a long text cannot push them into the box or off screen.
         int choiceRoom = ChoiceLayout.reservedHeight(node.choices().size(), minChoicePitch(), CHOICE_GAP);
         Component text = node.text();
+        List<FormattedText> panels = TextPages.splitPanels(text);
         box = DialogueLayout.compute(width, height, headshotLaidOut, hasName(), font.lineHeight, lineHeight,
-                choiceRoom, textWidth -> font.split(text, textWidth).size());
-        lines = font.split(text, box.textWidth());
-        pages = TextPages.paginate(TextPages.codepoints(lines), box.pageLines());
+                choiceRoom, textWidth -> maxPanelLines(panels, textWidth));
+        List<List<FormattedCharSequence>> wrappedPanels = panels.stream()
+                .map(panel -> font.split(panel, box.textWidth()))
+                .toList();
+        lines = wrappedPanels.stream().flatMap(List::stream).toList();
+        pages = TextPages.paginatePanels(
+                wrappedPanels.stream().map(TextPages::codepoints).toList(), box.pageLines());
         if (relayout) {
             page = pages.pageAt(pages.charOfGlyph(pageStartGlyphs));
             revealed = pages.charOfGlyph(revealedGlyphs);
@@ -198,6 +205,14 @@ public final class DialogueScreen extends Screen {
             revealed = 0;
         }
         startPage(now);
+    }
+
+    private int maxPanelLines(List<FormattedText> panels, int textWidth) {
+        int max = 0;
+        for (FormattedText panel : panels) {
+            max = Math.max(max, font.split(panel, textWidth).size());
+        }
+        return max;
     }
 
     /** Starts typing the current page at {@code now}, from where the text has been shown up to. */

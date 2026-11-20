@@ -4,20 +4,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.StringSplitter;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import org.junit.jupiter.api.Test;
 
 /**
- * The pages of a node's text: whole wrapped lines, as many as the box holds, ending early at a paragraph break in a
- * page's lower half, with no page after the first starting on a blank line; and positions, counted in non-whitespace
- * characters, that point at the same character after the text wraps to another width.
+ * The pages of a node's text: blank lines split the text into separate continuation panels, single line breaks stay in
+ * the same panel, panels taller than the box split into pages of whole lines, no page starts with a blank line, and
+ * positions counted in non-whitespace characters point at the same character after the text wraps to another width.
  */
 class TextPagesTest {
+    private static final StringSplitter FIXED_SPLITTER = new StringSplitter((codepoint, style) -> 6.0F);
     @Test
     void aTextThatFitsIsOnePage() {
         TextPages pages = TextPages.paginate(lines("one", "two", "three"), 5);
@@ -49,24 +52,109 @@ class TextPagesTest {
         assertEquals(5, pages.lineLength(2));
     }
 
-    /** Five lines fit, but the fifth starts a paragraph that runs on: the page ends at the blank line before it. */
     @Test
-    void aPageEndsAtAParagraphBreakInItsLowerHalf() {
-        TextPages pages = TextPages.paginate(lines("a", "b", "c", "", "d", "e", "f", "g"), 5);
+    void aBlankLineSplitsIntoSeparatePanelsEvenWhenBothFitInOneBox() {
+        Component text = Component.literal(
+                "Welcome, then. I'm The Administrator's Fragment. \n\nI do not know why I am here lmao.");
+        List<FormattedText> panels = TextPages.splitPanels(text);
+        assertEquals(2, panels.size());
+        assertEquals("Welcome, then. I'm The Administrator's Fragment. ", panels.get(0).getString());
+        assertEquals("I do not know why I am here lmao.", panels.get(1).getString());
+
+        TextPages pages = wrapAndPaginate(panels, 10_000, 5);
         assertEquals(2, pages.size());
-        assertEquals(0, pages.page(0).firstLine());
-        assertEquals(3, pages.page(0).endLine());
-        assertEquals(4, pages.page(1).firstLine(), "the next page starts after the blank line");
-        assertEquals(8, pages.page(1).endLine());
+        assertEquals(new TextPages.Page(0, 1, 0, 49), pages.page(0));
+        assertEquals(new TextPages.Page(1, 2, 49, 82), pages.page(1));
     }
 
-    /** Ending at a break that near the top would leave the page mostly empty, so the page runs to its full length. */
     @Test
-    void aParagraphBreakInAPagesUpperHalfDoesNotEndIt() {
-        TextPages pages = TextPages.paginate(lines("a", "", "b", "c", "d", "e", "f"), 5);
-        assertEquals(5, pages.page(0).endLine());
-        assertEquals(5, pages.page(1).firstLine());
-        assertEquals(7, pages.page(1).endLine());
+    void aSingleNewlineStaysInTheSamePanel() {
+        List<FormattedText> panels = TextPages.splitPanels(Component.literal("Line one\nLine two"));
+        assertEquals(1, panels.size());
+        assertEquals("Line one\nLine two", panels.getFirst().getString());
+
+        TextPages pages = wrapAndPaginate(panels, 10_000, 5);
+        assertEquals(1, pages.size());
+        assertEquals(new TextPages.Page(0, 2, 0, 16), pages.page(0));
+    }
+
+    @Test
+    void consecutiveWhitespaceCrlfAndEdgeBlankLinesMakeNoEmptyPanels() {
+        for (String input : new String[] {
+                "A\n\n\nB",
+                "A\n   \t\nB",
+                "A\r\n\r\nB",
+                "\n\nA\n\nB\n\n",
+                "  \r\n \t \r\nA\r\n\r\n  \nB\n   "
+        }) {
+            List<FormattedText> panels = TextPages.splitPanels(Component.literal(input));
+            assertEquals(2, panels.size(), input);
+            assertEquals("A", panels.get(0).getString());
+            assertEquals("B", panels.get(1).getString());
+        }
+
+        List<FormattedText> single = TextPages.splitPanels(Component.literal("\n\nA\n\n"));
+        assertEquals(1, single.size());
+        assertEquals("A", single.getFirst().getString());
+    }
+
+    @Test
+    void emptyAndBlankOnlyTextProducesOneEmptyPanelAndPage() {
+        for (Component text : new Component[] {
+                Component.empty(),
+                Component.literal("   \n\n\t\r\n ")
+        }) {
+            List<FormattedText> panels = TextPages.splitPanels(text);
+            assertEquals(1, panels.size());
+            assertEquals("", panels.getFirst().getString());
+            TextPages pages = wrapAndPaginate(panels, 240, 5);
+            assertEquals(1, pages.size());
+            assertEquals(new TextPages.Page(0, 0, 0, 0), pages.page(0));
+        }
+    }
+
+    @Test
+    void styledComponentsKeepTheirStylesAcrossBlankLineSplits() {
+        Style gold = Style.EMPTY.withColor(ChatFormatting.GOLD);
+        Style aqua = Style.EMPTY.withColor(ChatFormatting.AQUA);
+        Component inherited = Component.literal("First\n").withStyle(ChatFormatting.GOLD).append("\nSecond");
+        List<FormattedText> inheritedPanels = TextPages.splitPanels(inherited);
+        assertEquals(2, inheritedPanels.size());
+        assertEquals(List.of(new StyledRun("First", gold)), runsOf(inheritedPanels.get(0)));
+        assertEquals(List.of(new StyledRun("Second", gold)), runsOf(inheritedPanels.get(1)));
+
+        Component distinct = Component.literal("First")
+                .withStyle(ChatFormatting.GOLD)
+                .append("\n")
+                .append(Component.literal("\nSecond").withStyle(ChatFormatting.AQUA));
+        List<FormattedText> distinctPanels = TextPages.splitPanels(distinct);
+        assertEquals(2, distinctPanels.size());
+        assertEquals(List.of(new StyledRun("First", gold)), runsOf(distinctPanels.get(0)));
+        assertEquals(List.of(new StyledRun("Second", aqua)), runsOf(distinctPanels.get(1)));
+    }
+
+    /**
+     * A trailing space right at the wrap width before a single newline causes StringSplitter to emit a blank wrapped
+     * line, which must not create a second continuation panel.
+     */
+    @Test
+    void aTrailingSpaceBeforeASingleNewlineAtWrapWidthStaysInOnePanel() {
+        Component text = Component.literal("123456789 \nNext");
+        List<FormattedText> panels = TextPages.splitPanels(text);
+        assertEquals(1, panels.size());
+        TextPages pages = wrapAndPaginate(panels, 9 * 6, 5);
+        assertEquals(1, pages.size());
+    }
+
+    @Test
+    void aTallPanelOverflowsWhileTheNextPanelStillStartsOnAFreshPage() {
+        TextPages pages = TextPages.paginatePanels(List.of(
+                lines("a", "b", "c", "d", "e"),
+                lines("next")), 3);
+        assertEquals(3, pages.size());
+        assertEquals(new TextPages.Page(0, 3, 0, 3), pages.page(0));
+        assertEquals(new TextPages.Page(3, 5, 3, 5), pages.page(1));
+        assertEquals(new TextPages.Page(5, 6, 5, 9), pages.page(2));
     }
 
     @Test
@@ -179,18 +267,46 @@ class TextPagesTest {
                 .append(Component.literal("Maraha").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
                 .append(" kept a lighthouse;  Supercalifragilisticexpialidocious words break.\nThe end.");
         String glyphs = text.getString().replaceAll("\\s", "");
-        StringSplitter splitter = new StringSplitter((codepoint, style) -> 6.0F);
+        List<FormattedText> panels = TextPages.splitPanels(text);
+        assertEquals(2, panels.size());
         for (int width : new int[] {30, 66, 120, 240, 10_000}) {
-            List<FormattedCharSequence> wrapped =
-                    Language.getInstance().getVisualOrder(splitter.splitLines(text, width, Style.EMPTY));
-            List<int[]> lines = TextPages.codepoints(wrapped);
-            String flat = flatten(lines);
+            List<List<int[]>> wrappedPanels = wrapPanels(panels, width);
+            List<int[]> flatLines = new ArrayList<>();
+            for (List<int[]> panelLines : wrappedPanels) {
+                flatLines.addAll(panelLines);
+            }
+            String flat = flatten(flatLines);
             assertEquals(glyphs, flat.replaceAll("\\s", ""), "width " + width);
-            TextPages pages = TextPages.paginate(lines, 3);
+            TextPages pages = TextPages.paginatePanels(wrappedPanels, 3);
             for (int g = 0; g < glyphs.length(); g++) {
                 assertEquals(glyphs.charAt(g), flat.charAt(pages.charOfGlyph(g)), "width " + width + ", glyph " + g);
             }
         }
+    }
+
+    private record StyledRun(String text, Style style) {}
+
+    private static List<StyledRun> runsOf(FormattedText text) {
+        List<StyledRun> runs = new ArrayList<>();
+        text.visit((style, content) -> {
+            runs.add(new StyledRun(content, style));
+            return Optional.empty();
+        }, Style.EMPTY);
+        return runs;
+    }
+
+    private static List<List<int[]>> wrapPanels(List<FormattedText> panels, int width) {
+        List<List<int[]>> wrappedPanels = new ArrayList<>(panels.size());
+        for (FormattedText panel : panels) {
+            List<FormattedCharSequence> wrapped =
+                    Language.getInstance().getVisualOrder(FIXED_SPLITTER.splitLines(panel, width, Style.EMPTY));
+            wrappedPanels.add(TextPages.codepoints(wrapped));
+        }
+        return wrappedPanels;
+    }
+
+    private static TextPages wrapAndPaginate(List<FormattedText> panels, int width, int pageLines) {
+        return TextPages.paginatePanels(wrapPanels(panels, width), pageLines);
     }
 
     private static List<int[]> lines(String... lines) {
