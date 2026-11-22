@@ -24,7 +24,11 @@ Each player's dialogue flags and visit counts are stored in memory or in Postgre
   who talks to it, and scales from 1/16 up to 4 times normal size.
 - `/haruhi bind` attaches a graph to a placed block or to any existing entity, such as a vanilla villager or an armor
   stand. Using it opens the conversation in place of its vanilla interaction, so a bound chest does not open and a bound
-  villager does not trade. `/haruhi bindings` lists them and marks those whose graph the active content lacks.
+  villager does not trade. `/haruhi bindings` lists them and marks those whose graph the active content lacks, and
+  `/haruhi audit` toggles an in-world staff wireframe overlay for inspecting NPCs and bindings.
+- Clients visually mark talkable NPCs and active bindings with an interaction prompt (below the crosshair when drawn, or projected onto the target in third-person and Perspective API views), gold block selection outlines, nearby floating glyphs (independent of hidden name tags), optional ambient glints (in
+  `config/haruhi-client.json`), and clean Jade tooltips (no health/armor bars on invulnerable NPCs, plus talk/inspect
+  hints).
 - Clients draw NPCs with GeckoLib models and animations, or with the vanilla player model when GeckoLib is not
   installed.
 - The server caches flags and visit counts per character. Flag changes are written to storage in batches, visit counts

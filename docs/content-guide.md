@@ -52,6 +52,7 @@ Other commands that help while writing:
 | `/haruhi bind block <pos> <graph> [<speaker>]`, `/haruhi bind entity <targets> <graph> [<speaker>]` | Binds a graph to a block or an entity, so using it opens the graph. See [Bindings](#bindings-blocks-and-entities). |
 | `/haruhi unbind block <pos>`, `/haruhi unbind entity <targets>` | Removes a block's or the selected entities' bindings. |
 | `/haruhi bindings [all]` | Lists bindings nearby, or all of them, and marks those whose graph or speaker profile the live content lacks. |
+| `/haruhi audit [on\|off]` | Toggles the client's staff audit overlay, showing nearby NPCs, bound blocks, and bound entities in-world with their ids and missing-graph/profile markers. |
 | `/haruhi flags get <player> <namespace> <flag>` | Shows a player's flag value. |
 | `/haruhi flags set <player> <namespace> <flag> [value]` | Sets a flag; `value` defaults to 1. |
 | `/haruhi flags clear <player> <namespace> <flag>` | Clears a flag. |
@@ -417,6 +418,10 @@ Bindings live in the world, not in the bundle, so the bundle format has nothing 
   under it, so a villager bound with the profile `shop:mira` is Mira for `haruhi:visits`. Without one, those nodes
   show the graph's `speaker_name` if set (also replacing the block's or entity's name in Jade's tooltip when Jade is
   installed), else the block's or entity's own name, and visits count under `haruhi:none`.
+- Clients automatically show a crosshair prompt, a gold selection outline on bound blocks, and nearby floating
+  speech/inspect glyphs (independent of hidden name tags) for active bindings and talkable NPCs, configurable in
+  `config/haruhi-client.json`. When Jade is installed, Haruhi NPCs hide their health/armor bars and active targets show
+  an interact hint.
 - `haruhi:open`, `haruhi:goto` and the rest work as in any conversation. A graph chained with `haruhi:open` keeps the
   block or entity and the speaker. `haruhi:animation` and a node's `animation` play only on Haruhi NPCs, so they do
   nothing in a bound conversation.

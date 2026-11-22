@@ -14,6 +14,7 @@ public final class HaruhiNetworking {
         PayloadTypeRegistry.clientboundPlay().register(DialogueClosePayload.TYPE, DialogueClosePayload.STREAM_CODEC);
         PayloadTypeRegistry.clientboundPlay().register(NpcAnimationPayload.TYPE, NpcAnimationPayload.STREAM_CODEC);
         PayloadTypeRegistry.clientboundPlay().register(BoundBlocksPayload.TYPE, BoundBlocksPayload.STREAM_CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(AuditTogglePayload.TYPE, AuditTogglePayload.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(DialogueChoicePayload.TYPE, DialogueChoicePayload.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(DialogueDismissPayload.TYPE, DialogueDismissPayload.STREAM_CODEC);
     }

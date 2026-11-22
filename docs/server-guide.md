@@ -35,7 +35,7 @@ guide](content-guide.md); models and textures are in [models and animations](mod
   changes made since the last batch.
 - `/haruhi bindings` lists bound entities only while they are loaded; an entity binding is saved on the entity, and
   nothing indexes it elsewhere.
-- Bindings are not synced to clients, so a client may briefly show its own guess of a bound block's vanilla use, such
+- Client interaction prediction does not intercept clicks on bound blocks, so a client may briefly show its own guess of a bound block's vanilla use, such
   as a door swinging open, before the server puts it back.
 
 ## Install
@@ -385,17 +385,26 @@ A `done` result has `valid`:
 
 ```json
 {
-  "text_speed": 40
+  "text_speed": 40,
+  "crosshair_prompt": true,
+  "proximity_glyph": true,
+  "ambient_glints": false,
+  "gold_block_outline": true
 }
 ```
 
 | Key | Default | Rule |
 |---|---|---|
 | `text_speed` | `40` | characters per second that the dialogue screen types out; a positive number |
+| `crosshair_prompt` | `true` | shows gold corner pips and a compact `[RMB] Talk` / `[RMB] Inspect` prompt below the crosshair when drawn, or anchored onto the targeted NPC, entity, or block in third-person / Perspective API views where no crosshair is drawn |
+| `proximity_glyph` | `true` | shows a subtle bobbing gold speech or spark badge above nearby talkable NPCs and active bindings within player range that have camera line of sight (eye or glyph height, with perspective distance scaling) |
+| `ambient_glints` | `false` | emits sparse warm-gold dust motes around nearby talkable NPCs and active bindings |
+| `gold_block_outline` | `true` | tints the vanilla selection outline gold (`#FFD27F`) when aiming at an active bound block |
 
-A missing, zero, negative or non-numeric value, or a file that is not JSON, uses 40 and logs a warning such as
-`haruhi-client.json has no positive text_speed; using 40.0`. Players can click, or press Space or Enter, to show the
-whole line at once.
+A missing, zero, negative or non-numeric `text_speed`, or a file that is not JSON, uses 40 and logs a warning such as
+`haruhi-client.json has no positive text_speed; using 40.0`. Missing indicator keys silently use their defaults so older
+configs continue working; non-boolean indicator values log a warning and fall back to defaults. Players can click, or
+press Space or Enter, to show the whole line at once.
 
 ## Content at startup
 
@@ -591,6 +600,7 @@ conversation, as with an NPC.
 | `/haruhi unbind entity <targets>` | Removes the bindings of the selected entities. |
 | `/haruhi bindings` | Lists the block bindings and loaded bound entities within 32 blocks of where the command runs, in its dimension. |
 | `/haruhi bindings all` | Lists every block binding in every dimension, and every bound entity that is loaded. |
+| `/haruhi audit [on\|off]` | Toggles or sets the client's staff audit overlay, highlighting every loaded Haruhi NPC, bound block, and bound entity within 32 blocks (plus missing profiles/graphs) with wireframe boxes and labels. Players with permission level 2+ can also bind a key to `Toggle Staff Audit Overlay` in Controls. |
 
 `<graph>` must be a graph of the active content, and `<speaker>`, when given, an NPC profile of it; tab completion
 lists both. `<speaker>` names the character that speaks for the block or entity: its name and portrait show on nodes
@@ -641,10 +651,12 @@ bound.
 - An entity conversation is tied to the entity: it ends when the entity is more than 8 blocks from the player, dies or
   changes dimension, or when the player dies or leaves. The entity keeps doing what it does, so give a mob that should
   stay put `NoAI`. Actions that need a Haruhi NPC, such as `haruhi:animation`, do nothing on other entities.
-- The client does not know the bindings for interaction prediction, so for a moment it may show its own guess of the
-  vanilla result, such as a door swinging open; the server's block update puts it back. Entity bindings and block
-  `speaker_name` override hints are still synced so optional HUD overlays such as Jade can replace the target's name
-  when a player looks at it, without sending extra requests for unbound blocks or entities.
+- Interaction prediction does not intercept vanilla clicks on the client, so for a moment a client may show its own
+  guess of a bound block's vanilla use, such as a door swinging open; the server's block update puts it back. Block
+  bindings in the player's dimension, active dialogue graph ids, and entity bindings are synced so clients show
+  interact prompts, proximity glyphs, gold block outlines, staff audit boxes, and optional Jade tooltips (hiding hearts
+  and armor on invulnerable `haruhi:npc` entities, showing `Right-click to talk` / `inspect` hints, and replacing the
+  target's name when `speaker_name` applies without extra requests for unbound targets).
 - Block bindings are saved per dimension, in that dimension's `data/haruhi/block_bindings.dat`. A binding records the
   block that was there when it was bound and applies only while that block is at the position, in any state (a
   furnace that lights, a door that opens). A player who breaks the block removes its binding. The log shows

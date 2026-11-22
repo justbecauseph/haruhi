@@ -3,6 +3,7 @@ package town.lampas.haruhi.client.npc.gecko;
 import com.geckolib.constant.DataTickets;
 import com.geckolib.renderer.base.GeoRenderState;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
@@ -57,5 +58,16 @@ public final class GeckoNpcSupport {
             return Optional.empty();
         }
         return HeadBounds.forModel(BakedAssets.model(npc.look()));
+    }
+
+    /**
+     * The top of the GeckoLib model {@code npc} is drawn with, in blocks at scale 1. Empty when {@code npc} is not
+     * drawn by {@link GeckoNpcRenderer} or its model has not baked with cubes. Client thread only.
+     */
+    public static OptionalDouble modelTop(NpcEntity npc) {
+        if (!(Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(npc) instanceof GeckoNpcRenderer)) {
+            return OptionalDouble.empty();
+        }
+        return ModelTops.forModel(BakedAssets.model(npc.look()));
     }
 }

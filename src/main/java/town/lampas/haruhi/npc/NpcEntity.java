@@ -50,11 +50,16 @@ public class NpcEntity extends LivingEntity {
             SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
     static final EntityDataAccessor<String> LOOK_ANIMATIONS =
             SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
+    static final EntityDataAccessor<String> SYNCED_PROFILE =
+            SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
+    static final EntityDataAccessor<String> SYNCED_DIALOGUE =
+            SynchedEntityData.defineId(NpcEntity.class, EntityDataSerializers.STRING);
 
     private static final String PROFILE_KEY = "profile";
     private static final String LOOK_MODEL_KEY = "look_model";
     private static final String LOOK_TEXTURE_KEY = "look_texture";
     private static final String LOOK_ANIMATIONS_KEY = "look_animations";
+    private static final String SYNCED_DIALOGUE_KEY = "synced_dialogue";
 
     private @Nullable Identifier profileId;
     /** True until the first tick after a load or a profile change refreshes the look from the active content. */
@@ -74,6 +79,25 @@ public class NpcEntity extends LivingEntity {
     /** The profile id this NPC was given; empty before one is set. */
     public Optional<Identifier> profileId() {
         return Optional.ofNullable(profileId);
+    }
+
+    /** True when the server synced an active dialogue graph for this NPC. Safe on both sides. */
+    public boolean hasDialogue() {
+        return !entityData.get(SYNCED_DIALOGUE).isEmpty();
+    }
+
+    /** The profile id synced to clients, or empty when none is assigned. Safe on both sides. */
+    public Optional<Identifier> syncedProfileId() {
+        return parseOptionalId(entityData.get(SYNCED_PROFILE));
+    }
+
+    /** The active dialogue graph id synced to clients, or empty when silent or missing. Safe on both sides. */
+    public Optional<Identifier> syncedDialogueId() {
+        return parseOptionalId(entityData.get(SYNCED_DIALOGUE));
+    }
+
+    private static Optional<Identifier> parseOptionalId(String raw) {
+        return raw.isEmpty() ? Optional.empty() : Optional.ofNullable(Identifier.tryParse(raw));
     }
 
     /** The profile in the active content, or empty when there is none or it is missing from the active revision. */
@@ -126,6 +150,13 @@ public class NpcEntity extends LivingEntity {
                 .orElseGet(() -> profileId == null ? null : Component.literal(profileId.toString()));
         setCustomName(name);
         setCustomNameVisible(profile.isPresent());
+
+        entityData.set(SYNCED_PROFILE, profileId == null ? "" : profileId.toString());
+        String dialogueId = profile.flatMap(NpcProfile::dialogue)
+                .filter(bundle.dialogues()::containsKey)
+                .map(Identifier::toString)
+                .orElse("");
+        entityData.set(SYNCED_DIALOGUE, dialogueId);
     }
 
     @Override
@@ -252,6 +283,8 @@ public class NpcEntity extends LivingEntity {
         builder.define(LOOK_MODEL, NpcLook.DEFAULT.syncedModel());
         builder.define(LOOK_TEXTURE, NpcLook.DEFAULT.syncedTexture());
         builder.define(LOOK_ANIMATIONS, NpcLook.DEFAULT.syncedAnimations());
+        builder.define(SYNCED_PROFILE, "");
+        builder.define(SYNCED_DIALOGUE, "");
     }
 
     @Override
@@ -269,6 +302,8 @@ public class NpcEntity extends LivingEntity {
         entityData.set(LOOK_MODEL, input.getStringOr(LOOK_MODEL_KEY, NpcLook.DEFAULT.syncedModel()));
         entityData.set(LOOK_TEXTURE, input.getStringOr(LOOK_TEXTURE_KEY, NpcLook.DEFAULT.syncedTexture()));
         entityData.set(LOOK_ANIMATIONS, input.getStringOr(LOOK_ANIMATIONS_KEY, NpcLook.DEFAULT.syncedAnimations()));
+        entityData.set(SYNCED_PROFILE, this.profileId == null ? "" : this.profileId.toString());
+        entityData.set(SYNCED_DIALOGUE, input.getStringOr(SYNCED_DIALOGUE_KEY, ""));
         this.lookStale = true;
     }
 
@@ -281,5 +316,6 @@ public class NpcEntity extends LivingEntity {
         output.putString(LOOK_MODEL_KEY, entityData.get(LOOK_MODEL));
         output.putString(LOOK_TEXTURE_KEY, entityData.get(LOOK_TEXTURE));
         output.putString(LOOK_ANIMATIONS_KEY, entityData.get(LOOK_ANIMATIONS));
+        output.putString(SYNCED_DIALOGUE_KEY, entityData.get(SYNCED_DIALOGUE));
     }
 }

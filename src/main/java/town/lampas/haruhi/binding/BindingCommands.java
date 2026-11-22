@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Predicate;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -28,6 +29,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
@@ -35,6 +37,7 @@ import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 import town.lampas.haruhi.api.HaruhiServices;
 import town.lampas.haruhi.content.model.ContentBundle;
+import town.lampas.haruhi.network.AuditTogglePayload;
 
 /**
  * {@code /haruhi bind}, {@code /haruhi unbind} and {@code /haruhi bindings}, for gamemasters. Graphs and speaker profiles
@@ -74,7 +77,11 @@ final class BindingCommands {
                                         .executes(BindingCommands::unbindEntities))))
                 .then(Commands.literal("bindings").requires(GAMEMASTERS)
                         .executes(context -> list(context, false))
-                        .then(Commands.literal("all").executes(context -> list(context, true)))));
+                        .then(Commands.literal("all").executes(context -> list(context, true))))
+                .then(Commands.literal("audit").requires(GAMEMASTERS)
+                        .executes(context -> toggleAudit(context, Optional.empty()))
+                        .then(Commands.literal("on").executes(context -> toggleAudit(context, Optional.of(true))))
+                        .then(Commands.literal("off").executes(context -> toggleAudit(context, Optional.of(false))))));
     }
 
     private static RequiredArgumentBuilder<CommandSourceStack, Identifier>
@@ -185,6 +192,16 @@ final class BindingCommands {
             source.sendSuccess(() -> Component.literal(line), false);
         }
         return Math.max(0, lines.size() - 1);
+    }
+
+    private static int toggleAudit(CommandContext<CommandSourceStack> context, Optional<Boolean> mode)
+            throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        if (!ServerPlayNetworking.canSend(player, AuditTogglePayload.TYPE)) {
+            throw fail("Your client does not support the Haruhi staff audit overlay");
+        }
+        ServerPlayNetworking.send(player, new AuditTogglePayload(mode));
+        return Command.SINGLE_SUCCESS;
     }
 
     /**

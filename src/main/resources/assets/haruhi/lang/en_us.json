@@ -2,5 +2,13 @@
   "entity.haruhi.npc": "NPC",
   "screen.haruhi.dialogue.continue": "Space or click to continue",
   "screen.haruhi.dialogue.more": "Space or click for more",
-  "screen.haruhi.dialogue.page": "%s/%s"
+  "screen.haruhi.dialogue.page": "%s/%s",
+  "hud.haruhi.indicator.talk": "Talk",
+  "hud.haruhi.indicator.inspect": "Inspect",
+  "jade.haruhi.talk": "%s to talk",
+  "jade.haruhi.inspect": "%s to inspect",
+  "key.category.haruhi.haruhi": "Haruhi",
+  "key.haruhi.audit": "Toggle Staff Audit Overlay",
+  "message.haruhi.audit.on": "Haruhi staff audit overlay: ON",
+  "message.haruhi.audit.off": "Haruhi staff audit overlay: OFF"
 }

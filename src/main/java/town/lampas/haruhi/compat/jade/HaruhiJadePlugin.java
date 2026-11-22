@@ -31,6 +31,8 @@ import town.lampas.haruhi.client.jade.HaruhiJadeClient;
 public final class HaruhiJadePlugin implements IWailaPlugin {
     public static final Identifier SPEAKER_NAME_UID = Haruhi.id("speaker_name");
     public static final int SPEAKER_NAME_PRIORITY = TooltipPosition.HEAD - 50;
+    public static final Identifier INTERACT_HINT_UID = Haruhi.id("interact_hint");
+    public static final int INTERACT_HINT_PRIORITY = TooltipPosition.BODY + 50;
 
     @Override
     public void register(IWailaCommonRegistration registration) {

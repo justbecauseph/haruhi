@@ -58,4 +58,15 @@ public final class NpcClient {
                 ? GeckoNpcSupport.headBounds(npc)
                 : Optional.empty();
     }
+
+    /**
+     * The top of the model {@code npc} is drawn with, in blocks at scale 1. Falls back to
+     * {@link NameTagPlacement#HUMANOID_TOP} when GeckoLib is absent or the model has not baked. Client thread only.
+     */
+    public static double modelTop(NpcEntity npc) {
+        if (FabricLoader.getInstance().isModLoaded(GECKOLIB_MOD_ID)) {
+            return GeckoNpcSupport.modelTop(npc).orElse(NameTagPlacement.HUMANOID_TOP);
+        }
+        return NameTagPlacement.HUMANOID_TOP;
+    }
 }

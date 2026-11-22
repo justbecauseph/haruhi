@@ -18,7 +18,15 @@ public final class DialogueClientConfig {
     public static final double DEFAULT_TEXT_SPEED = 40.0;
 
     private static final String TEXT_SPEED_KEY = "text_speed";
-    private static final String DEFAULT_CONTENT = "{\n  \"" + TEXT_SPEED_KEY + "\": 40\n}\n";
+    private static final String DEFAULT_CONTENT = """
+            {
+              "%s": 40,
+              "crosshair_prompt": true,
+              "proximity_glyph": true,
+              "ambient_glints": false,
+              "gold_block_outline": true
+            }
+            """.formatted(TEXT_SPEED_KEY);
     private static final Logger LOGGER = LoggerFactory.getLogger("Haruhi/dialogue");
 
     private DialogueClientConfig() {}

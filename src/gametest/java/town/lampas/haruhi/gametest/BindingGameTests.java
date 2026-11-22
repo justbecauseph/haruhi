@@ -24,6 +24,8 @@ import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
+import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -583,36 +585,86 @@ public final class BindingGameTests {
                         BoundBlocksPayload payload = BoundBlockSync.payloadFor(level, HaruhiServices.content().active());
                         helper.assertValueEqual(payload.blocks(),
                                 List.of(new BoundBlocksPayload.Entry(stonePos,
-                                        Identifier.withDefaultNamespace("stone"))),
+                                        Identifier.withDefaultNamespace("stone"),
+                                        NAMED, Optional.empty(), true, true)),
                                 "BoundBlockSync includes the bound stone");
+                        helper.assertTrue(payload.activeGraphs().containsAll(List.of(BOUND, NAMED, NAMED_SCORE)),
+                                "BoundBlockSync activeGraphs includes fixture graphs");
                         BoundBlockHints.apply(payload);
                         helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.shouldRequestData(
                                         blockAccessor(level, scene.player, stonePos)),
                                 "shouldRequestData is true when the synced stone is targeted");
+                        helper.assertTrue(BoundBlockHints.isActiveBound(level, stonePos, level.getBlockState(stonePos)),
+                                "isActiveBound is true when the synced stone is targeted");
+                        helper.assertTrue(BoundBlockHints.isGraphActive(NAMED), "isGraphActive matches synced graph");
 
                         // Temporarily replacing the block hides both the hint match and the server override.
                         helper.setBlock(STONE_AT, Blocks.OAK_PLANKS);
                         helper.assertFalse(HaruhiJadePlugin.BlockDataProvider.INSTANCE.shouldRequestData(
                                         blockAccessor(level, scene.player, stonePos)),
                                 "shouldRequestData is false when another block stands at the position");
+                        helper.assertFalse(BoundBlockHints.isActiveBound(level, stonePos, level.getBlockState(stonePos)),
+                                "isActiveBound is false when another block stands at the position");
                         helper.assertTrue(BindingNames.blockNameOverride(level, stonePos, level.getBlockState(stonePos),
                                 scene.player).isEmpty(), "blockNameOverride is empty when another block stands there");
                         helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
                                 blockAccessor(level, scene.player, stonePos)) == null,
                                 "streamData is null when another block stands there");
 
-                        // A graph without speaker_name or with a loaded NPC speaker suppresses the override.
+                        // A graph without speaker_name or with a loaded NPC speaker suppresses Jade name override,
+                        // while still syncing as an active bound block for interact indicators.
                         helper.setBlock(STONE_AT, Blocks.STONE);
                         command(helper, "haruhi bind block " + coords(stonePos) + " " + BOUND);
-                        helper.assertValueEqual(BoundBlockSync.payloadFor(level, HaruhiServices.content().active()).blocks(),
-                                List.of(), "plain graph without speaker_name is omitted from hint sync");
+                        BoundBlocksPayload plainPayload = BoundBlockSync.payloadFor(level, HaruhiServices.content().active());
+                        helper.assertValueEqual(plainPayload.blocks(),
+                                List.of(new BoundBlocksPayload.Entry(stonePos,
+                                        Identifier.withDefaultNamespace("stone"),
+                                        BOUND, Optional.empty(), true, false)),
+                                "plain graph without speaker_name syncs without name override");
+                        BoundBlockHints.apply(plainPayload);
+                        helper.assertTrue(BoundBlockHints.isActiveBound(level, stonePos, level.getBlockState(stonePos)),
+                                "plain bound stone is active");
+                        helper.assertFalse(HaruhiJadePlugin.BlockDataProvider.INSTANCE.shouldRequestData(
+                                        blockAccessor(level, scene.player, stonePos)),
+                                "plain graph without speaker_name does not request Jade override data");
                         helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
                                 blockAccessor(level, scene.player, stonePos)) == null,
                                 "streamData is null for a graph without speaker_name");
 
+                        // A missing graph syncs as inactive so indicators stay off while audit sees the broken entry.
+                        activate(helper, WITHOUT_GRAPH);
+                        try {
+                            BoundBlocksPayload missingPayload =
+                                    BoundBlockSync.payloadFor(level, HaruhiServices.content().active());
+                            helper.assertValueEqual(missingPayload.blocks(),
+                                    List.of(new BoundBlocksPayload.Entry(stonePos,
+                                            Identifier.withDefaultNamespace("stone"),
+                                            BOUND, Optional.empty(), false, false)),
+                                    "missing graph syncs as inactive bound entry");
+                            BoundBlockHints.apply(missingPayload);
+                            helper.assertFalse(BoundBlockHints.isActiveBound(level, stonePos, level.getBlockState(stonePos)),
+                                    "missing graph is not active bound");
+                            helper.assertValueEqual(BoundBlockHints.entriesIn(level).size(), 1,
+                                    "entriesIn retains inactive bound block for audit");
+                            helper.assertFalse(BoundBlockHints.isGraphActive(BOUND),
+                                    "missing graph is absent from activeGraphs");
+                        } finally {
+                            activate(helper, FIXTURE);
+                        }
+
                         command(helper, "haruhi bind block " + coords(stonePos) + " " + NAMED + " " + CLERK);
-                        helper.assertValueEqual(BoundBlockSync.payloadFor(level, HaruhiServices.content().active()).blocks(),
-                                List.of(), "NPC speaker profile suppresses speaker_name in hint sync");
+                        BoundBlocksPayload npcPayload = BoundBlockSync.payloadFor(level, HaruhiServices.content().active());
+                        helper.assertValueEqual(npcPayload.blocks(),
+                                List.of(new BoundBlocksPayload.Entry(stonePos,
+                                        Identifier.withDefaultNamespace("stone"),
+                                        NAMED, Optional.of(CLERK), true, false)),
+                                "NPC speaker profile suppresses speaker_name override while keeping bound entry");
+                        BoundBlockHints.apply(npcPayload);
+                        helper.assertTrue(BoundBlockHints.isActiveBound(level, stonePos, level.getBlockState(stonePos)),
+                                "bound stone with NPC speaker is active");
+                        helper.assertFalse(HaruhiJadePlugin.BlockDataProvider.INSTANCE.shouldRequestData(
+                                        blockAccessor(level, scene.player, stonePos)),
+                                "NPC speaker profile skips Jade name override data request");
                         helper.assertTrue(HaruhiJadePlugin.BlockDataProvider.INSTANCE.streamData(
                                 blockAccessor(level, scene.player, stonePos)) == null,
                                 "streamData is null when a loaded NPC profile speaks");
@@ -704,6 +756,45 @@ public final class BindingGameTests {
 
                     command(helper, "haruhi unbind entity " + villager.getStringUUID());
                     villager.discard();
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * {@code /haruhi audit} requires gamemaster permission and rejects a player whose client lacks the audit channel
+     * cleanly.
+     */
+    @GameTest(maxTicks = 200)
+    public void auditCommandRequiresGamemasterAndClientChannel(GameTestHelper helper) {
+        Scene scene = new Scene();
+        join(helper, scene)
+                .thenExecute(() -> {
+                    CommandSourceStack unprivileged = scene.player.createCommandSourceStack()
+                            .withPermission(PermissionSet.NO_PERMISSIONS)
+                            .withSuppressedOutput();
+                    for (String cmd : List.of("haruhi audit", "haruhi audit on", "haruhi audit off")) {
+                        boolean rejected = false;
+                        try {
+                            helper.getLevel().getServer().getCommands().getDispatcher().execute(cmd, unprivileged);
+                        } catch (CommandSyntaxException expected) {
+                            rejected = true;
+                        }
+                        helper.assertTrue(rejected, "non-gamemaster must be refused: " + cmd);
+                    }
+
+                    CommandSourceStack gamemaster = scene.player.createCommandSourceStack()
+                            .withPermission(LevelBasedPermissionSet.GAMEMASTER)
+                            .withSuppressedOutput();
+                    String failure = null;
+                    try {
+                        helper.getLevel().getServer().getCommands().getDispatcher().execute("haruhi audit", gamemaster);
+                    } catch (CommandSyntaxException expected) {
+                        failure = expected.getMessage();
+                    }
+                    helper.assertValueEqual(
+                            failure,
+                            "Your client does not support the Haruhi staff audit overlay",
+                            "mock player without audit channel gets refusal message");
                 })
                 .thenSucceed();
     }

@@ -23,11 +23,14 @@ public final class BoundBlockSync {
         Identifier dimension = level.dimension().identifier();
         List<BoundBlocksPayload.Entry> blocks = new ArrayList<>();
         for (BlockBindings.Entry entry : BlockBindings.of(level).entries()) {
-            if (BindingNames.nameOverride(entry.binding().binding(), content).isPresent()) {
-                blocks.add(new BoundBlocksPayload.Entry(entry.pos(), entry.binding().block()));
-            }
+            BlockBinding binding = entry.binding();
+            boolean active = content.dialogues().containsKey(binding.graph());
+            boolean hasNameOverride = BindingNames.nameOverride(binding.binding(), content).isPresent();
+            blocks.add(new BoundBlocksPayload.Entry(
+                    entry.pos(), binding.block(), binding.graph(), binding.speaker(), active, hasNameOverride));
         }
-        return new BoundBlocksPayload(dimension, blocks);
+        List<Identifier> activeGraphs = content.dialogues().keySet().stream().sorted().toList();
+        return new BoundBlocksPayload(dimension, blocks, activeGraphs);
     }
 
     static void syncPlayer(ServerPlayer player) {

@@ -75,6 +75,7 @@ public final class NpcGameTests {
     /** The fixture with the styled profile changed: the Alex skin, and no model or animations. */
     private static final String RESTYLED_FIXTURE = "/haruhi/fixtures/npc/npc_bundle_restyled.json";
     private static final Identifier GREETER = Identifier.fromNamespaceAndPath("haruhi", "fixture/greeter");
+    private static final Identifier SILENT = Identifier.fromNamespaceAndPath("haruhi", "fixture/silent");
     private static final Identifier STYLED = Identifier.fromNamespaceAndPath("haruhi", "fixture/styled");
     /** The look the fixture's styled profile gives its NPC: its model and animations are the styled id. */
     private static final NpcLook STYLED_LOOK = new NpcLook(
@@ -234,6 +235,72 @@ public final class NpcGameTests {
                         // What the server sends to tracking clients when the entity data changes.
                         receive(helper, npc, tracking, npc.getEntityData().packDirty());
                         helper.assertValueEqual(tracking.look(), restyled, "the look change a tracking client receives");
+                    } finally {
+                        HaruhiServices.content().activateUnstored(previous);
+                    }
+                })
+                .thenSucceed();
+    }
+
+    /**
+     * Dialogue and profile ids sync to tracking clients, reflect silent profiles as having no dialogue, survive save
+     * and load before the first tick, and update when a content revision activates.
+     */
+    @GameTest(environment = ENVIRONMENT, maxTicks = 20)
+    public void dialogueAndProfileSyncToTrackingClientsAndFollowActivation(GameTestHelper helper) {
+        afterStartupContent(helper)
+                .thenExecute(() -> {
+                    ContentBundle previous = HaruhiServices.content().active();
+                    try {
+                        activateFixtures();
+                        NpcEntity greeter = spawn(helper, GREETER, new Vec3(2.5, 2.0, 2.5));
+                        helper.assertTrue(greeter.hasDialogue(), "greeter profile has dialogue");
+                        helper.assertValueEqual(greeter.syncedProfileId(), Optional.of(GREETER), "greeter synced profile");
+                        helper.assertValueEqual(greeter.syncedDialogueId(), Optional.of(GREETER), "greeter synced dialogue");
+
+                        NpcEntity silent = spawn(helper, SILENT, new Vec3(3.5, 2.0, 2.5));
+                        helper.assertFalse(silent.hasDialogue(), "silent profile has no dialogue");
+                        helper.assertValueEqual(silent.syncedProfileId(), Optional.of(SILENT), "silent synced profile");
+                        helper.assertValueEqual(silent.syncedDialogueId(), Optional.empty(), "silent synced dialogue");
+
+                        NpcEntity loaded = saveAndLoad(helper, greeter);
+                        helper.assertTrue(loaded.hasDialogue(), "loaded NPC keeps synced dialogue before first tick");
+                        helper.assertValueEqual(loaded.syncedProfileId(), Optional.of(GREETER),
+                                "loaded NPC keeps synced profile before first tick");
+                        helper.assertValueEqual(loaded.syncedDialogueId(), Optional.of(GREETER),
+                                "loaded NPC keeps synced dialogue id before first tick");
+
+                        NpcEntity tracking = NpcEntities.NPC.create(helper.getLevel(), EntitySpawnReason.LOAD);
+                        helper.assertTrue(tracking != null, "the NPC type could not create an entity");
+                        receive(helper, greeter, tracking, greeter.getEntityData().getNonDefaultValues());
+                        helper.assertTrue(tracking.hasDialogue(), "tracking client sees dialogue");
+                        helper.assertValueEqual(tracking.syncedProfileId(), Optional.of(GREETER),
+                                "tracking client sees profile");
+                        helper.assertValueEqual(tracking.syncedDialogueId(), Optional.of(GREETER),
+                                "tracking client sees dialogue id");
+
+                        greeter.getEntityData().packDirty();
+                        greeter.setProfile(SILENT);
+                        receive(helper, greeter, tracking, greeter.getEntityData().packDirty());
+                        helper.assertFalse(tracking.hasDialogue(), "tracking client sees silent profile has no dialogue");
+                        helper.assertValueEqual(tracking.syncedProfileId(), Optional.of(SILENT),
+                                "tracking client sees updated profile");
+                        helper.assertValueEqual(tracking.syncedDialogueId(), Optional.empty(),
+                                "tracking client sees cleared dialogue id");
+
+                        // Swap back to GREETER, then activate RESTYLED_FIXTURE which lacks GREETER.
+                        greeter.setProfile(GREETER);
+                        receive(helper, greeter, tracking, greeter.getEntityData().packDirty());
+                        helper.assertTrue(tracking.hasDialogue(), "tracking client sees dialogue restored");
+
+                        activate(RESTYLED_FIXTURE);
+                        helper.assertFalse(greeter.hasDialogue(),
+                                "activation dropping GREETER clears hasDialogue on loaded NPC");
+                        helper.assertValueEqual(greeter.syncedDialogueId(), Optional.empty(),
+                                "activation dropping GREETER clears syncedDialogueId");
+                        receive(helper, greeter, tracking, greeter.getEntityData().packDirty());
+                        helper.assertFalse(tracking.hasDialogue(),
+                                "tracking client receives cleared dialogue on activation");
                     } finally {
                         HaruhiServices.content().activateUnstored(previous);
                     }
