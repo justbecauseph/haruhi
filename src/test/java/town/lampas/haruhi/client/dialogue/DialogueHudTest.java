@@ -12,6 +12,7 @@ import java.util.OptionalInt;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
+import town.lampas.haruhi.client.api.DialogueStyleScreen;
 
 /**
  * The HUD under the dialogue screen. While it is open: the hotbar, the armor, health, food, air and mount health bars,
@@ -83,6 +84,17 @@ class DialogueHudTest {
         }
     }
 
+    /**
+     * Another mod's screen that implements {@link DialogueStyleScreen} gets the same HUD as the dialogue screen. A screen
+     * without the marker, and no screen at all, do not.
+     */
+    @Test
+    void aScreenThatImplementsDialogueStyleScreenIsADialogueScreen() {
+        assertTrue(DialogueHud.isDialogueScreen(new StyledScreen()));
+        assertFalse(DialogueHud.isDialogueScreen(new Object()));
+        assertFalse(DialogueHud.isDialogueScreen(null));
+    }
+
     @Test
     void theChatStaysWhereVanillaPutsItWithoutADialogue() {
         assertEquals(0, DialogueHud.chatShift(HEIGHT, OptionalInt.empty(), 0));
@@ -152,6 +164,12 @@ class DialogueHudTest {
         assertTrue(gap >= 2 && gap <= 6,
                 "the chat's bottom edge is at " + chatBottom + ", " + gap + " pixels above the box's top at " + boxTop);
     }
+
+    /**
+     * Stands in for another mod's screen, which would extend {@code Screen}. A {@code Screen} cannot be built here: its
+     * constructor reads the client's font.
+     */
+    private static final class StyledScreen implements DialogueStyleScreen {}
 
     /** Every vanilla HUD element Fabric names. */
     private static List<Identifier> vanillaElements() throws IllegalAccessException {

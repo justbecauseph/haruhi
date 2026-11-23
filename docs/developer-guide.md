@@ -8,6 +8,7 @@ guide](content-guide.md), and the model pipeline in [models and animations](mode
 - [A conversation from click to close](#a-conversation-from-click-to-close)
 - [Network payloads](#network-payloads)
 - [Extending Haruhi from another mod](#extending-haruhi-from-another-mod)
+- [Client API](#client-api)
 - [Adding a storage backend](#adding-a-storage-backend)
 - [Building and testing](#building-and-testing)
 - [Repository layout](#repository-layout)
@@ -129,7 +130,8 @@ next start begins clean.
 `HudElementRegistry`. While the screen is open it skips `HOTBAR`, `ARMOR_BAR`, `HEALTH_BAR`, `FOOD_BAR`, `AIR_BAR`,
 `MOUNT_HEALTH`, `INFO_BAR`, `EXPERIENCE_LEVEL`, `HELD_ITEM_TOOLTIP` and `CROSSHAIR`, and translates `CHAT` up so its
 bottom edge sits 4 pixels above the text box, or above the choice list when the list reaches across the chat. Every
-other element draws as usual.
+other element draws as usual. A screen from another mod that implements `DialogueStyleScreen` gets the same treatment,
+except that it has no choice list (see [Client API](#client-api)).
 
 Known gap: Fabric API's `INFO_BAR` wraps only `ContextualBar.extractBackground`. The locator bar draws its waypoint
 markers in `LocatorBar.extractRenderState`, which has no HUD element, so the markers still draw under the box. The
@@ -527,6 +529,79 @@ Call these getters from server events or later, not from your `onInitialize`: Ha
 when your entrypoint runs, and a getter called too early throws. `DialogueRegistries` is static and safe to call from
 `onInitialize`.
 
+## Client API
+
+A client mod can draw a screen in the look of the dialogue screen. The API is in `town.lampas.haruhi.client.api`; nothing
+else in `town.lampas.haruhi.client` is meant for other mods. Every method runs on the client thread, and the drawing
+methods belong in the screen's `extractRenderState`.
+
+| Member | Gives |
+|---|---|
+| `DialogueStyle.BOX_FILL`, `BOX_EDGE`, `PORTRAIT_FILL` | the text box's fill, its one-pixel edge (which also draws the divider under a name), and the fill behind a headshot, as ARGB colours |
+| `DialogueStyle.NAME_TEXT`, `TEXT`, `CHOICE_TEXT`, `CHOICE_LOCKED_TEXT`, `CHOICE_HOVER_TEXT` | the colours of the speaker's name, the body text, a choice that can be picked, a choice that cannot, and a choice under the pointer or selected |
+| `DialogueStyle.drawBox(graphics, x0, y0, x1, y1)` | the filled box with its edge, in GUI pixels from `(x0, y0)` to `(x1, y1)` |
+| `DialogueStyle.drawEdge(graphics, x0, y0, x1, y1)` | a one-pixel edge just inside that rectangle |
+| `DialogueStyle.drawHeadshot(graphics, speaker, x0, y0, x1, y1)` | a headshot square, with the head of `speaker` drawn in it when `speaker` is not null, else an empty frame |
+| `DialogueStyle.drawPortrait(graphics, texture, x0, y0, x1, y1)` | the same square with a 2D texture stretched over it |
+| `DialogueStyleScreen` | the interface a screen implements to get the dialogue HUD: the vanilla elements under the box are hidden and the chat moves above the box. `hudBoxTop()`, the GUI y of the box's top edge, defaults to empty, which leaves the chat where vanilla puts it |
+
+`drawHeadshot` and `drawPortrait` take the inside of the square. Their edge is drawn one pixel outside it.
+
+A screen that implements `DialogueStyleScreen` and draws a box and a headshot:
+
+```java
+package com.example.shop;
+
+import java.util.OptionalInt;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.LivingEntity;
+import town.lampas.haruhi.client.api.DialogueStyle;
+import town.lampas.haruhi.client.api.DialogueStyleScreen;
+
+public final class ShopScreen extends Screen implements DialogueStyleScreen {
+    private static final int MARGIN = 12;
+    private static final int BOX_HEIGHT = 96;
+    private static final int HEADSHOT = 64;
+    private final LivingEntity merchant;
+
+    public ShopScreen(LivingEntity merchant) {
+        super(Component.literal("Shop"));
+        this.merchant = merchant;
+    }
+
+    @Override
+    public OptionalInt hudBoxTop() {
+        return OptionalInt.of(boxTop());
+    }
+
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        minecraft.gui.hud.extractDeferredSubtitles();
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        int top = boxTop();
+        DialogueStyle.drawBox(graphics, MARGIN, top, width - MARGIN, height - MARGIN);
+        int headX = MARGIN + 14;
+        int headY = top + 14;
+        DialogueStyle.drawHeadshot(graphics, merchant, headX, headY, headX + HEADSHOT, headY + HEADSHOT);
+        graphics.text(font, "Wares", headX + HEADSHOT + 10, headY, DialogueStyle.NAME_TEXT);
+    }
+
+    private int boxTop() {
+        return height - MARGIN - BOX_HEIGHT;
+    }
+}
+```
+
+- `extractBackground` is overridden as in `DialogueScreen`, which draws no blur, panorama or menu background, so the
+  world shows behind the box. Vanilla's `Screen.extractBackground` draws one of those, depending on the screen.
+- The chat is kept clear of the box only. Anything else the screen draws above the box, such as a list of choices, can
+  sit under the chat.
+
 ## Adding a storage backend
 
 `HaruhiStorage` is the interface for durable state. `StorageModule.build` chooses between the two built-in backends from
@@ -684,6 +759,7 @@ src/main/java/town/lampas/haruhi/
   binding/                     block and entity bindings, their use callbacks, /haruhi bind, unbind and bindings
   client/                      HaruhiClient, the client entrypoint
   client/dialogue/             DialogueScreen, DialogueHud, layout, keys, typewriter, client config
+  client/api/                  DialogueStyle, DialogueStyleScreen: the public look and HUD hook for other mods' screens
   client/npc/                  vanilla renderer, headshot, asset fallback
   client/npc/gecko/            GeckoLib renderer and model support, loaded only with GeckoLib
 src/main/resources/

@@ -20,7 +20,7 @@ import net.minecraft.util.Util;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import org.lwjgl.glfw.GLFW;
-import town.lampas.haruhi.client.npc.HeadshotRenderer;
+import town.lampas.haruhi.client.api.DialogueStyle;
 import town.lampas.haruhi.client.npc.NpcLookAssets;
 import town.lampas.haruhi.network.ChoiceView;
 import town.lampas.haruhi.network.DialogueChoicePayload;
@@ -58,17 +58,9 @@ public final class DialogueScreen extends Screen {
     /** The space between the page indicator and the hint left of it. */
     private static final int INDICATOR_GAP = 8;
 
-    private static final int BOX_FILL = 0xD0101018;
-    private static final int BOX_EDGE = 0xFF8A7F6A;
-    private static final int NAME_TEXT = 0xFFFFD27F;
-    private static final int TEXT = 0xFFF2EDE2;
     private static final int HINT = 0xFFB8B09E;
     private static final int CHOICE_FILL = 0xB0101018;
     private static final int CHOICE_HOVER_FILL = 0xD0304060;
-    private static final int CHOICE_TEXT = 0xFFF2EDE2;
-    private static final int CHOICE_HOVER_TEXT = 0xFFFFE08A;
-    private static final int CHOICE_LOCKED_TEXT = 0xFF77736A;
-    private static final int PORTRAIT_FILL = 0xB0000000;
     private static final String MORE_ABOVE = "\u25B2";
     private static final String MORE_BELOW = "\u25BC";
     /** How long a sent choice blocks further input. The server ignores a stale pick silently, so this must expire. */
@@ -259,21 +251,11 @@ public final class DialogueScreen extends Screen {
     }
 
     private void drawBox(GuiGraphicsExtractor graphics) {
-        int right = box.boxX() + box.boxWidth();
-        int bottom = box.boxY() + box.boxHeight();
-        graphics.fill(box.boxX(), box.boxY(), right, bottom, BOX_FILL);
-        drawEdge(graphics, box.boxX(), box.boxY(), right, bottom);
+        DialogueStyle.drawBox(graphics, box.boxX(), box.boxY(), box.boxX() + box.boxWidth(),
+                box.boxY() + box.boxHeight());
     }
 
-    /** A one-pixel {@link #BOX_EDGE} line just inside the rectangle from {@code (x0, y0)} to {@code (x1, y1)}. */
-    private static void drawEdge(GuiGraphicsExtractor graphics, int x0, int y0, int x1, int y1) {
-        graphics.fill(x0, y0, x1, y0 + 1, BOX_EDGE);
-        graphics.fill(x0, y1 - 1, x1, y1, BOX_EDGE);
-        graphics.fill(x0, y0, x0 + 1, y1, BOX_EDGE);
-        graphics.fill(x1 - 1, y0, x1, y1, BOX_EDGE);
-    }
-
-    /** The headshot square with an edge around it: the portrait, else the speaker's head, else an empty frame. */
+    /** The headshot square: the portrait, else the speaker's head, else an empty frame. */
     private void drawHeadshot(GuiGraphicsExtractor graphics, LivingEntity speaker) {
         if (!box.hasFrame()) {
             return;
@@ -282,12 +264,10 @@ public final class DialogueScreen extends Screen {
         int y0 = box.frameY();
         int x1 = x0 + box.frameSize();
         int y1 = y0 + box.frameSize();
-        drawEdge(graphics, x0 - 1, y0 - 1, x1 + 1, y1 + 1);
-        graphics.fill(x0, y0, x1, y1, PORTRAIT_FILL);
         if (portrait.isPresent()) {
-            graphics.blit(portrait.get(), x0, y0, x1, y1, 0.0F, 1.0F, 0.0F, 1.0F);
-        } else if (speaker != null) {
-            HeadshotRenderer.draw(graphics, speaker, x0, y0, x1, y1);
+            DialogueStyle.drawPortrait(graphics, portrait.get(), x0, y0, x1, y1);
+        } else {
+            DialogueStyle.drawHeadshot(graphics, speaker, x0, y0, x1, y1);
         }
     }
 
@@ -298,10 +278,10 @@ public final class DialogueScreen extends Screen {
         }
         List<FormattedCharSequence> name = font.split(node.speakerName(), box.textWidth());
         if (!name.isEmpty()) {
-            graphics.text(font, name.getFirst(), box.textX(), box.nameY(), NAME_TEXT);
+            graphics.text(font, name.getFirst(), box.textX(), box.nameY(), DialogueStyle.NAME_TEXT);
         }
         graphics.fill(box.textX(), box.dividerY(), box.textRight(), box.dividerY() + DialogueLayout.DIVIDER_HEIGHT,
-                BOX_EDGE);
+                DialogueStyle.BOX_EDGE);
     }
 
     /** Draws the current page's lines top to bottom, up to the character offset {@code visible}, with their styles. */
@@ -311,7 +291,7 @@ public final class DialogueScreen extends Screen {
         for (int line = current.firstLine(); line < current.endLine(); line++) {
             int take = Math.clamp(visible - pages.lineStart(line), 0, pages.lineLength(line));
             if (take > 0) {
-                graphics.text(font, prefix(lines.get(line), take), box.textX(), y, TEXT);
+                graphics.text(font, prefix(lines.get(line), take), box.textX(), y, DialogueStyle.TEXT);
             }
             y += lineHeight;
         }
@@ -348,7 +328,8 @@ public final class DialogueScreen extends Screen {
             choiceRows.add(new ChoiceRow(i, left, y0, right, y1));
 
             graphics.fill(left, y0, right, y1, hovered && choice.enabled() ? CHOICE_HOVER_FILL : CHOICE_FILL);
-            int color = !choice.enabled() ? CHOICE_LOCKED_TEXT : hovered ? CHOICE_HOVER_TEXT : CHOICE_TEXT;
+            int color = !choice.enabled() ? DialogueStyle.CHOICE_LOCKED_TEXT
+                    : hovered ? DialogueStyle.CHOICE_HOVER_TEXT : DialogueStyle.CHOICE_TEXT;
             String number = i < ChoiceKeys.MAX_KEYED_CHOICES ? (i + 1) + ". " : "";
             // The first line that fits the row. A label wider than the row is cut short, not drawn past the screen edge.
             List<FormattedCharSequence> fitted = font.split(Component.literal(number).append(choice.text()), labelWidth);

@@ -6,16 +6,21 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ChatComponent;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.Identifier;
 import org.joml.Matrix3x2fStack;
+import org.jspecify.annotations.Nullable;
+import town.lampas.haruhi.client.api.DialogueStyleScreen;
 
 /**
- * The vanilla HUD while a {@link DialogueScreen} is open. The screen draws no background, so without this the HUD draws
- * crisp under the dialogue box: the hotbar below it, and the status bars, experience bar, crosshair and held-item name
- * through it. While the screen is open, the elements in {@link #HIDDEN} are not drawn, and the chat, which stays because
- * {@code haruhi:message} posts dialogue text to it, moves up so its bottom edge sits {@link #CHAT_GAP} pixels above the
- * box, or above the choice list when the list reaches across the chat. Every other element (boss bar, titles, subtitles, scoreboard, mob effects, player list, overlay message) draws as
- * it does without a dialogue. The decisions are pure functions, so they are unit tested.
+ * The vanilla HUD while a dialogue screen is open: a {@link DialogueScreen}, or any screen that implements
+ * {@link DialogueStyleScreen}. The screen draws no background, so without this the HUD draws crisp under the dialogue
+ * box: the hotbar below it, and the status bars, experience bar, crosshair and held-item name through it. While the
+ * screen is open, the elements in {@link #HIDDEN} are not drawn, and the chat, which stays because {@code haruhi:message}
+ * posts dialogue text to it, moves up so its bottom edge sits {@link #CHAT_GAP} pixels above the box, or above the
+ * choice list when the list reaches across the chat. A {@link DialogueStyleScreen} has no choice list, so the chat only
+ * moves above its box. Every other element (boss bar, titles, subtitles, scoreboard, mob effects, player list, overlay
+ * message) draws as it does without a dialogue. The decisions are pure functions, so they are unit tested.
  */
 final class DialogueHud {
     /** The vanilla HUD elements not drawn while a dialogue screen is open. */
@@ -61,7 +66,7 @@ final class DialogueHud {
             });
         }
         HudElementRegistry.replaceElement(VanillaHudElements.CHAT, original -> (graphics, deltaTracker) -> {
-            DialogueScreen screen = openScreen();
+            Screen screen = openScreen();
             int shift = 0;
             if (screen != null) {
                 Minecraft minecraft = Minecraft.getInstance();
@@ -71,8 +76,7 @@ final class DialogueHud {
                 int queued = minecraft.gui.chatListener().queueSize() > 0
                         ? (int) Math.ceil(QUEUE_STRIP_HEIGHT * chatScale)
                         : 0;
-                shift = chatShift(graphics.guiHeight(),
-                        chatFloor(screen.boxTop(), screen.choiceLeft(), screen.choiceTop(), chatRight), queued);
+                shift = chatShift(graphics.guiHeight(), chatFloorFor(screen, chatRight), queued);
             }
             if (shift == 0) {
                 original.extractRenderState(graphics, deltaTracker);
@@ -93,6 +97,15 @@ final class DialogueHud {
     /** Whether the HUD element {@code element} is left out of this frame. */
     static boolean hides(Identifier element, boolean dialogueOpen) {
         return dialogueOpen && HIDDEN.contains(element);
+    }
+
+    /**
+     * Whether {@code screen} is a dialogue screen for the HUD: a {@link DialogueScreen}, or a
+     * {@link DialogueStyleScreen}. Takes an Object, so a unit test can pass a screen without building a Minecraft
+     * {@link Screen}, which needs a client.
+     */
+    static boolean isDialogueScreen(@Nullable Object screen) {
+        return screen instanceof DialogueScreen || screen instanceof DialogueStyleScreen;
     }
 
     /**
@@ -125,8 +138,20 @@ final class DialogueHud {
         return Math.min(0, floor.getAsInt() - CHAT_GAP - chatBottom);
     }
 
+    /** The chat's floor for the open dialogue screen: its box, and for a {@link DialogueScreen} its choice list too. */
+    private static OptionalInt chatFloorFor(Screen screen, int chatRight) {
+        if (screen instanceof DialogueScreen dialogue) {
+            return chatFloor(dialogue.boxTop(), dialogue.choiceLeft(), dialogue.choiceTop(), chatRight);
+        }
+        if (screen instanceof DialogueStyleScreen style) {
+            return chatFloor(style.hudBoxTop(), OptionalInt.empty(), OptionalInt.empty(), chatRight);
+        }
+        return OptionalInt.empty();
+    }
+
     /** The open screen when it is a dialogue screen, else null. Client thread only. */
-    private static DialogueScreen openScreen() {
-        return Minecraft.getInstance().gui.screen() instanceof DialogueScreen screen ? screen : null;
+    private static Screen openScreen() {
+        Screen screen = Minecraft.getInstance().gui.screen();
+        return isDialogueScreen(screen) ? screen : null;
     }
 }
