@@ -289,7 +289,7 @@ repositories {
 }
 
 dependencies {
-    implementation "town.lampas:haruhi:0.5.0"
+    implementation "town.lampas:haruhi:0.6.0"
 }
 ```
 
@@ -645,7 +645,7 @@ of `./gradlew`.
 | Task | Does |
 |---|---|
 | `./gradlew build` | compiles, builds the jars, runs `test` and, through `check`, `runGameTest` |
-| `./gradlew assemble` | builds `build/libs/haruhi-0.5.0.jar` and the sources jar without running tests |
+| `./gradlew assemble` | builds `build/libs/haruhi-0.6.0.jar` and the sources jar without running tests |
 | `./gradlew test` | the JUnit 5 unit tests, including `ArchitectureTest` and the converter tests |
 | `./gradlew runGameTest` | the server GameTests |
 | `./gradlew runClient` | a development client with Haruhi and GeckoLib, for checking the screen and the renderer by hand |
